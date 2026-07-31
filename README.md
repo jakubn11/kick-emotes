@@ -6,7 +6,7 @@
 
 <p>
   BetterTTV, 7TV, and FrankerFaceZ emotes directly in Kick.com chat.<br>
-  Animated GIFs · Zero-width overlays · Autocomplete · Native emote picker tab.
+  Animated GIFs · Zero-width overlays · Autocomplete · Favourites · Native emote picker tab.
 </p>
 
 <p>

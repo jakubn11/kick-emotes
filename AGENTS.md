@@ -30,7 +30,7 @@ Manual testing is required in a browser with a userscript manager installed:
 5. Verify autocomplete attaches to the chat input and supports arrow navigation, Tab selection, and Esc close.
 6. Navigate between Kick channels and confirm channel-specific emotes reload.
 7. Right-click a rendered emote and verify the context menu (favourite, copy name, copy image URL, open provider page).
-8. Insert a few emotes, reopen the picker's 7TV+ tab, and verify the "Recently used" section and usage-first autocomplete ranking.
+8. Insert a few emotes, reopen the picker's 7TV+ tab, and verify the "Recently used" section and usage-ranked autocomplete.
 9. Favourite an emote from chat and from the picker; verify the ★ appears in the tooltip, the autocomplete row, and the picker badge, that the "Favourites" section updates while the picker is open, and that unstarring reverses all of it.
 10. Hover an emote in chat and in the picker and verify the tooltip shows the large preview without jumping once the image loads.
 11. Post `cvMask` after another emote in a channel with BTTV loaded and verify it overlays rather than sitting beside it.
@@ -118,9 +118,9 @@ When fixing Kick DOM breakage, prefer adding fallback selectors rather than repl
 ## Emote Rendering Notes
 
 - Emote images use `.kte-img` with a 28px height.
-- Zero-width 7TV emotes overlay the previous emote via `.kte-zw`.
+- Zero-width emotes overlay the previous emote via `.kte-zw` — 7TV emotes flagged by the provider, plus the BTTV codes in `BTTV_ZERO_WIDTH`.
 - `makeEmoteWrap` returns a plain text node when `safeUrl()` rejects the emote's URL. Only elements may anchor a zero-width overlay — a text node has no `dataset` and throws on `appendChild`, which would abort rendering for the whole message. Keep the element check on the zero-width anchor.
-- Text nodes are split on whitespace; exact token matches are replaced.
+- Text nodes are split on whitespace; exact token matches are replaced. Text under a `SKIP_TEXT_SELECTORS` ancestor (links, the username button) is left alone — see DOM And Routing Notes.
 - Processed message elements receive `data-kte-version="<emoteVersion>"` to avoid duplicate rendering; bumping `emoteVersion` (provider refresh, channel change) makes them eligible for reprocessing.
 
 Be careful when changing text processing: chat messages can contain links, existing elements, and text nodes inserted incrementally by the Kick frontend.
@@ -129,7 +129,7 @@ Be careful when changing text processing: chat messages can contain links, exist
 
 Autocomplete is intentionally lightweight and local:
 
-- It searches loaded emote names with prefix matching first, padding remaining slots with substring matches. Within each group, results are ranked by local usage counts (most-used first), with shortest-name-then-alphabetical as the stable tiebreak.
+- It searches loaded emote names with prefix matching first, padding remaining slots with substring matches. Within each group, favourites rank first, then local usage counts (most-used first), with shortest-name-then-alphabetical as the stable tiebreak.
 - It displays up to 8 results.
 - It supports contenteditable inputs and textarea/input fallbacks.
 - It uses `document.execCommand('insertText')` for contenteditable insertion to preserve frontend reactivity.
