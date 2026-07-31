@@ -54,14 +54,17 @@ The script uses standard GM APIs (only `GM_xmlhttpRequest`) and should work with
 
 | Source | Coverage |
 |--------|----------|
-| **BetterTTV** | ~2 000 global emotes + channel emotes (when available) |
-| **7TV** | ~1 000 global emotes + channel emotes (via Kick or Twitch lookup) |
-| **FrankerFaceZ** | ~500 global emotes + channel emotes |
+| **BetterTTV** | ~65 global emotes + channel emotes (when available) |
+| **7TV** | ~45 global emotes + channel emotes (via Kick or Twitch lookup) |
+| **FrankerFaceZ** | ~10 global emotes + channel emotes |
+
+Global sets are each provider's small curated default; channel sets are where the hundreds of emotes come from.
 
 - On every Kick channel page the script fetches emotes from all three services.
 - Chat messages are scanned as they arrive; any matching word is replaced with the emote image.
-- Hover over an emote to see its name and which service it came from; right-click it to copy the name/image URL or open its provider page.
-- Open Kick's emote picker and choose the **7TV+** tab to browse/search loaded third-party emotes; clicking one inserts its text code into chat. The picker starts with 40 matches per provider for performance, offers **Load more** per provider, and search narrows across all loaded emotes.
+- Hover over an emote to see a large preview with its name and source; right-click it to favourite it, copy the name/image URL, or open its provider page.
+- Favourited emotes get a ★, a **Favourites** section at the top of the picker, and first place in autocomplete.
+- Open Kick's emote picker and choose the **7TV+** tab to browse/search loaded third-party emotes; clicking one inserts its text code into chat, and right-clicking one opens the same menu as in chat. The picker starts with 40 matches per provider for performance, offers **Load more** per provider, and search narrows across all loaded emotes.
 - Navigating between channels reloads the channel-specific emote sets automatically.
 
 ## Updating

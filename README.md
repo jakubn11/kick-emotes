@@ -30,11 +30,12 @@
 - Emotes from three providers rendered inline in chat messages
 - Per-channel emote sets loaded automatically on navigation
 - Animated emote support (GIF)
-- Zero-width 7TV emote overlays
-- Hover tooltips showing emote name and provider
-- Autocomplete popup when typing (prefix match with substring fallback, your most-used emotes ranked first, keyboard navigation)
-- Right-click context menu on chat emotes — copy the name or image URL, or open the emote's 7TV/BTTV/FFZ page
-- Third-party emote tab inside Kick's native emote picker with a **Recently used** section, search, animated emotes, and per-provider **Load more**
+- Zero-width emote overlays (7TV overlay emotes and BTTV's `cvMask`, `SoSnowy`, `SantaHat` & co.)
+- Hover tooltips showing a large emote preview with its name and provider
+- Favourite emotes — star them from the right-click menu for a pinned picker section and top billing in autocomplete
+- Autocomplete popup when typing (prefix match with substring fallback, favourites then your most-used emotes first, keyboard navigation)
+- Right-click context menu on chat and picker emotes — favourite it, copy the name or image URL, or open the emote's 7TV/BTTV/FFZ page
+- Third-party emote tab inside Kick's native emote picker with **Favourites** and **Recently used** sections, search, animated emotes, and per-provider **Load more**
 - Stale-while-revalidate local cache per provider to show repeat-visit emotes immediately while refreshing in the background
 - Works with Kick's SPA routing — no page reload needed when switching channels
 - A clean dark glass popup style with a green accent, matching the sibling [kick-fullscreen-chat](https://github.com/jakubn11/kick-fullscreen-chat), [kick-quality-saver](https://github.com/jakubn11/kick-quality-saver), [kick-chat-utils](https://github.com/jakubn11/kick-chat-utils), and [kick-vod-resume](https://github.com/jakubn11/kick-vod-resume) userscripts' design language
@@ -70,9 +71,11 @@ See [INSTALL.md](INSTALL.md) for full per-manager steps.
 
 | Provider | Global emotes | Channel emotes |
 |----------|--------------|----------------|
-| BetterTTV | ~2 000 | Kick + Twitch fallback |
-| 7TV | ~1 000 | Kick + Twitch fallback |
-| FrankerFaceZ | ~500 | Kick channel |
+| BetterTTV | ~65 | Kick + Twitch fallback |
+| 7TV | ~45 | Kick + Twitch fallback |
+| FrankerFaceZ | ~10 | Kick channel |
+
+Global sets are small by design — they're each provider's curated default set. The bulk of what you see comes from the channel sets, which is where streamers put hundreds of emotes. FFZ's global "emote effects" (`ffzSpin`, `ffzRainbow`, …) are skipped: they're modifiers meant to animate the preceding emote, not emotes in their own right.
 
 Provider failures are isolated — if one fails, the others still load.
 
@@ -88,9 +91,11 @@ Open any Kick channel. Emotes load automatically and replace matching words in c
 | Tab | Insert the selected emote (top match if none is selected) |
 | Esc | Close autocomplete |
 
-**Context menu:** right-click any third-party emote in chat to copy its name or image URL, or open its page on the source provider.
+**Context menu:** right-click any third-party emote — in chat or in the picker — to favourite it, copy its name or image URL, or open its page on the source provider.
 
-**Emote picker:** open Kick's native emote picker and choose the **7TV+** tab to browse animated third-party emotes. A **Recently used** section with your latest emotes appears above the provider groups. The picker starts with 40 matches per provider for performance, then offers **Load more** per provider. Search narrows across all loaded emotes. Clicking an emote inserts its code into the chat input. Animated 7TV emotes show their frozen first frame in the picker and start animating when you hover them — this keeps the page responsive when browsing large emote sets.
+**Favourites:** starred emotes get a ★ marker wherever they appear, a **Favourites** section at the top of the picker (most recently starred first), and first place in the autocomplete ranking, ahead of your most-used emotes. Up to 100 are kept locally; starring a 101st drops the oldest.
+
+**Emote picker:** open Kick's native emote picker and choose the **7TV+** tab to browse animated third-party emotes. **Favourites** and **Recently used** sections appear above the provider groups. The picker starts with 40 matches per provider for performance, then offers **Load more** per provider. Search narrows across all loaded emotes. Clicking an emote inserts its code into the chat input. Animated 7TV emotes show their frozen first frame in the picker and start animating when you hover them — this keeps the page responsive when browsing large emote sets.
 
 ## Troubleshooting
 
@@ -99,7 +104,7 @@ Open any Kick channel. Emotes load automatically and replace matching words in c
 | No emotes appear | Open your browser's DevTools → Console and look for `[KickEmotes]` log lines. If absent, check that your userscript extension is enabled for kick.com. |
 | Only global emotes load | The streamer may not have BTTV/7TV/FFZ configured for their channel. |
 | Emotes stop working after a Kick update | Kick may have changed their chat DOM selectors. Open an issue with the relevant class names from the browser inspector. |
-| Stale emotes after a script update | Clear the cache: `Object.keys(localStorage).filter(k => k.startsWith('kte_') && k !== 'kte_v2_usage').forEach(k => localStorage.removeItem(k))` — the `kte_v2_usage` key is excluded so your recently-used emotes and autocomplete ranking survive. |
+| Stale emotes after a script update | Clear the cache: `Object.keys(localStorage).filter(k => k.startsWith('kte_') && k !== 'kte_v2_usage' && k !== 'kte_v2_favs').forEach(k => localStorage.removeItem(k))` — the `kte_v2_usage` and `kte_v2_favs` keys are excluded so your favourites, recently-used emotes, and autocomplete ranking survive. |
 
 ## License
 

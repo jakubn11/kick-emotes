@@ -29,8 +29,11 @@ Manual testing is required in a browser with a userscript manager installed:
 4. Verify global and channel emotes render in chat.
 5. Verify autocomplete attaches to the chat input and supports arrow navigation, Tab selection, and Esc close.
 6. Navigate between Kick channels and confirm channel-specific emotes reload.
-7. Right-click a rendered emote and verify the context menu (copy name, copy image URL, open provider page).
+7. Right-click a rendered emote and verify the context menu (favourite, copy name, copy image URL, open provider page).
 8. Insert a few emotes, reopen the picker's 7TV+ tab, and verify the "Recently used" section and usage-first autocomplete ranking.
+9. Favourite an emote from chat and from the picker; verify the ★ appears in the tooltip, the autocomplete row, and the picker badge, that the "Favourites" section updates while the picker is open, and that unstarring reverses all of it.
+10. Hover an emote in chat and in the picker and verify the tooltip shows the large preview without jumping once the image loads.
+11. Post `cvMask` after another emote in a channel with BTTV loaded and verify it overlays rather than sitting beside it.
 
 ## Userscript Metadata
 
@@ -49,9 +52,10 @@ Do not add `Co-Authored-By:` trailers to git commits.
 `kick-third-party-emotes.user.js` is organized into these areas:
 
 - Userscript metadata and constants
-- Cache helper using `localStorage` keys prefixed with `kte_v2_` (old-prefix and long-expired keys are swept once per page load)
-- Local emote-usage tracker (`kte_v2_usage`, exempt from the sweep) powering autocomplete ranking and the picker's "Recently used" section
-- Emote context menu (`#kte-menu`) on right-clicked chat emotes
+- Cache helper using `localStorage` keys prefixed with `kte_v3_` (old-prefix and long-expired keys are swept once per page load)
+- Local emote-usage tracker (`kte_v2_usage`) powering autocomplete ranking and the picker's "Recently used" section
+- Local favourites store (`kte_v2_favs`) powering the picker's "Favourites" section, the top of the autocomplete ranking, and the ★ markers
+- Emote context menu (`#kte-menu`) on right-clicked chat **and picker** emotes
 - Provider loaders for BTTV, 7TV, and FFZ
 - DOM message processing and emote replacement
 - Autocomplete popup and chat input handling
@@ -68,6 +72,13 @@ Map<string, { url: string, source: string, animated: boolean, zeroWidth: boolean
 
 Each provider loader should add `[code, emote]` entries through `cachedLoad()`.
 
+### Storage keys
+
+Two separate namespaces, deliberately:
+
+- **`CACHE_PREFIX` (`kte_v3_`)** — provider data. Bump the prefix whenever the emote schema *or the meaning of a field* changes, so stale entries are refetched instead of served for up to their TTL. (`v2` added `staticUrl`; `v3` gave BTTV entries real `zeroWidth` flags.) `sweepCache` deletes keys from older prefixes.
+- **`USAGE_KEY` / `FAVS_KEY` (`kte_v2_*`)** — user state. These are listed in `PRESERVED_KEYS` and are skipped by the sweep, so a cache-prefix bump never wipes someone's favourites or ranking. Do not derive them from `CACHE_PREFIX`.
+
 ## External APIs
 
 Current provider endpoints:
@@ -75,6 +86,12 @@ Current provider endpoints:
 - BetterTTV: `https://api.betterttv.net/3`
 - 7TV: `https://7tv.io/v3` (global emote set) and `https://7tv.io/v4/gql` (channel emotes via GraphQL user search)
 - FrankerFaceZ: `https://api.frankerfacez.com/v1`
+
+Provider quirks worth knowing before "fixing" a loader:
+
+- **BTTV exposes no zero-width flag.** `BTTV_ZERO_WIDTH` is the same hardcoded overlay list BTTV's own clients ship. If BTTV adds seasonal overlay emotes, extend the set.
+- **FFZ `modifier: true` entries are not emotes.** They're effect modifiers (`ffzSpin`, `ffzRainbow`, `ffzX`, …) that FFZ clients apply as CSS to the preceding emote. Both FFZ loaders skip them; rendering them standalone produces meaningless 32px icons.
+- **Global sets are small** (BTTV ~65, 7TV ~45, FFZ ~10 after modifiers are dropped). A low emote count is not by itself evidence of a broken loader — check the channel sets.
 
 Prefer preserving the current graceful-failure behavior. Provider failures should not stop other providers from loading.
 
@@ -126,7 +143,7 @@ If modifying autocomplete, test both insertion and keyboard handling in the actu
 - **Never use native `title` attributes** on script-injected elements. Use `data-kte-tip` + `showTooltip`/`hideTooltip` instead (see UI Design System).
 - **Never use `eval`, `new Function(string)`, `setTimeout(string)`, or `setInterval(string)`.**
 - **Never trust provider API responses without validation.** Use optional chaining (`?.`) and nullish defaults. Validate shapes before use — see `isValidCacheEntry` as a reference.
-- **Never store sensitive data in `localStorage`.** The cache stores emote codes, URLs, and source names; the usage record stores emote codes with insert counts and timestamps. Nothing sensitive, and nothing leaves the machine.
+- **Never store sensitive data in `localStorage`.** The cache stores emote codes, URLs, and source names; the usage record stores emote codes with insert counts and timestamps; the favourites record stores emote codes. Nothing sensitive, and nothing leaves the machine.
 - **Never read back `localStorage` data without validation.** Always run it through the cache schema check (`isValidCacheEntry`) before putting it into `emoteMap`.
 
 ### Checks — run mentally before every commit
@@ -170,6 +187,12 @@ Values as actually used in the script (verified against `_style.textContent`):
 Provider brand colours are **deliberately not** family colours — telling sources apart at a
 glance is the feature: 7TV `#4da6ff`, BTTV `#ff6b6b`, FFZ `#c084fc`, anything else `#22c55e`.
 
+The favourite star (`#facc15`, used by `.kte-tip-star`, `.kte-ac-fav`, and the picker button's
+`::after` badge) is a semantic colour in the same sense: gold is the universal "starred"
+affordance, and reusing `#22c55e` would both break the one-accent-per-component rule and make
+the marker read as structure rather than state. It is the only non-provider colour outside the
+family palette — do not add more without the same kind of justification.
+
 ### Rules
 
 - **One green accent per component.** Use `#22c55e` for one structural element only — a border stripe, a header label, or a badge. Never paint large surfaces green.
@@ -186,7 +209,7 @@ glance is the feature: 7TV `#4da6ff`, BTTV `#ff6b6b`, FFZ `#c084fc`, anything el
 
 ### Reference implementations
 
-- `#kte-tip` — tooltip/hint popup (green left border stripe)
+- `#kte-tip` — tooltip/hint popup (green left border stripe); a column of `.kte-tip-preview` (64px emote image, box reserved in CSS so positioning is stable before load) above `.kte-tip-label`
 - `#kte-ac` — autocomplete dropdown (green top border + green header label)
 - `#kte-menu` — emote context menu (green left border stripe)
 - `.kte-picker-more` — picker action button (green background tint, green border)

@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.0] - 2026-07-31
+
+### Added
+- **Favourite emotes.** Right-click any third-party emote — in chat or in the 7TV+ picker — and choose "Add to favourites". Favourites get their own section at the top of the picker (newest star first), rank above usage in autocomplete, and are marked with a ★ in the picker, the autocomplete rows, and the hover tooltip. Stored locally in a `kte_v2_favs` record, capped at 100 emotes (oldest star dropped), never leaves the machine, and is exempt from the cache sweep.
+- **Large emote preview in the hover tooltip.** Hovering an emote in chat or the picker now shows the emote at 64px above the name/provider line. The image is already decoded from the message or the picker grid, so it costs nothing beyond layout; a dead URL collapses the preview instead of leaving an empty frame.
+- **Right-click menu in the emote picker.** Picker emotes now open the same context menu as chat emotes (favourite, copy name, copy image URL, open provider page).
+
+### Fixed
+- **BetterTTV zero-width emotes now overlay the preceding emote instead of sitting beside it.** BTTV's API exposes no overlay flag, so both BTTV loaders hardcoded `zeroWidth: false` — including for `cvMask` and `cvHazmat`, which are in BTTV's global set today. The known BTTV overlay list (`SoSnowy`, `IceCold`, `SantaHat`, `TopHat`, `ReinDeer`, `CandyCane`, `cvMask`, `cvHazmat`) is now applied, matching what BTTV's own clients do.
+- **FrankerFaceZ effect modifiers are no longer loaded as emotes.** `ffzHyper`, `ffzSpin`, `ffzRainbow`, `ffzX` and friends are `modifier: true` entries — CSS effects meant to be applied to the preceding emote, not standalone emotes. They were over half of FFZ's global set and rendered as meaningless 32px icons. Entries flagged as modifiers are now skipped in both FFZ loaders.
+
+### Changed
+- Emote cache prefix bumped from `kte_v2_` to `kte_v3_` so cached BTTV entries — all of which claim `zeroWidth: false` — are refetched rather than served for up to 12 hours. The sweep drops the orphaned `kte_v2_` cache keys on the next page load.
+- The usage record (`kte_v2_usage`) and the new favourites record (`kte_v2_favs`) are now keyed independently of the cache prefix: they hold user state with no tie to the emote schema, so a future cache-prefix bump won't wipe them.
+
 ## [2.8.7] - 2026-07-19
 
 ### Changed

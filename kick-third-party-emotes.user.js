@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Kick Third-Party Emotes
 // @namespace    https://kick.com
-// @version      2.8.7
-// @description  Adds BetterTTV, 7TV & FrankerFaceZ emotes to Kick.com chat — animated & zero-width emotes, usage-ranked autocomplete, right-click emote menu, native picker tab with recents
+// @version      2.9.0
+// @description  Adds BetterTTV, 7TV & FrankerFaceZ emotes to Kick.com chat — animated & zero-width emotes, usage-ranked autocomplete, favourites, hover previews, right-click emote menu, native picker tab with recents
 // @author       jakubnl94@gmail.com
 // @license      GPL-3.0-only
 // @icon         https://raw.githubusercontent.com/jakubn11/kick-third-party-emotes/main/icon.svg
@@ -35,6 +35,14 @@
   const SEVENTV_API = 'https://7tv.io/v3';
   const SEVENTV_GQL = 'https://7tv.io/v4/gql';
   const FFZ_API = 'https://api.frankerfacez.com/v1';
+
+  // BTTV's API exposes no overlay flag, so its own clients carry this fixed
+  // list of zero-width emotes. Without it `cvMask`/`cvHazmat` — both in BTTV
+  // global today — render side by side instead of stacking on the base emote.
+  const BTTV_ZERO_WIDTH = new Set([
+    'SoSnowy', 'IceCold', 'SantaHat', 'TopHat', 'ReinDeer', 'CandyCane',
+    'cvMask', 'cvHazmat',
+  ]);
 
   const ALLOWED_CDN_HOSTS = new Set([
     'cdn.betterttv.net',
@@ -97,13 +105,22 @@
     return true;
   }
 
-  // Prefix bumped from `kte_` to `kte_v2_` when adding `staticUrl` to the
-  // emote schema. Orphaned v1 keys are removed by sweepCache below.
-  const CACHE_PREFIX = 'kte_v2_';
+  // Prefix bumped from `kte_` to `kte_v2_` when adding `staticUrl` to the emote
+  // schema, and to `kte_v3_` when BTTV emotes gained real zeroWidth flags —
+  // cached v2 entries all claim `zeroWidth: false`. Orphaned keys from older
+  // prefixes are removed by sweepCache below.
+  const CACHE_PREFIX = 'kte_v3_';
 
-  // Every visited channel leaves kte_v2_*_c_<slug> keys behind and localStorage
+  // User state, not cached provider data: it has no schema tied to the emote
+  // shape, so it deliberately keeps its own stable prefix and survives every
+  // cache-prefix bump. sweepCache skips these keys.
+  const USAGE_KEY = 'kte_v2_usage';
+  const FAVS_KEY = 'kte_v2_favs';
+  const PRESERVED_KEYS = new Set([USAGE_KEY, FAVS_KEY]);
+
+  // Every visited channel leaves kte_v3_*_c_<slug> keys behind and localStorage
   // never evicts them, so a long tail of channels would eventually hit quota
-  // and silently disable caching. Drop pre-v2 keys and anything long expired.
+  // and silently disable caching. Drop old-prefix keys and anything long expired.
   const CACHE_SWEEP_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
   function sweepCache() {
@@ -112,8 +129,8 @@
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
         if (!key?.startsWith('kte_')) continue;
+        if (PRESERVED_KEYS.has(key)) continue; // usage + favourites persist indefinitely
         if (!key.startsWith(CACHE_PREFIX)) { doomed.push(key); continue; }
-        if (key === USAGE_KEY) continue; // usage stats persist indefinitely
         try {
           const { ts } = JSON.parse(localStorage.getItem(key));
           if (typeof ts !== 'number' || Date.now() - ts > CACHE_SWEEP_MAX_AGE) doomed.push(key);
@@ -150,7 +167,6 @@
   // Local-only counter of inserted emotes (autocomplete + picker). Powers
   // usage-first autocomplete ranking and the picker's "Recently used" section.
 
-  const USAGE_KEY = `${CACHE_PREFIX}usage`;
   const USAGE_MAX_ENTRIES = 200;
 
   let usageMap = null; // code → { n: insert count, t: last-used timestamp }
@@ -203,6 +219,62 @@
         const counts = {};
         for (const [code, v] of usageLoad()) counts[code] = [v.n, v.t];
         localStorage.setItem(USAGE_KEY, JSON.stringify({ ts: Date.now(), counts }));
+      } catch { /* quota exceeded – skip silently */ }
+    });
+  }
+
+  // ─── Favourites ───────────────────────────────────────────────────────────
+  // Local-only starred emote codes. Favourites outrank usage in autocomplete
+  // and get their own picker section above "Recently used".
+
+  const FAVS_MAX_ENTRIES = 100;
+
+  let favSet = null; // insertion-ordered Set of codes, oldest first
+  let favSaveQueued = false;
+
+  function favLoad() {
+    if (favSet) return favSet;
+    favSet = new Set();
+    try {
+      const raw = localStorage.getItem(FAVS_KEY);
+      if (raw) {
+        const { codes } = JSON.parse(raw);
+        for (const code of Array.isArray(codes) ? codes : []) {
+          if (isSafeTextToken(code, 100)) favSet.add(code);
+        }
+      }
+    } catch { /* corrupted record – start fresh */ }
+    return favSet;
+  }
+
+  function favHas(code) {
+    return favLoad().has(code);
+  }
+
+  // Newest first — the picker section reads most-recently-starred at the top.
+  function favCodes() {
+    return [...favLoad()].reverse();
+  }
+
+  function favToggle(code) {
+    const set = favLoad();
+    const added = !set.delete(code);
+    if (added) {
+      set.add(code);
+      // Drop the oldest star once full (adds grow the set by at most one).
+      if (set.size > FAVS_MAX_ENTRIES) set.delete(set.values().next().value);
+    }
+    favSave();
+    return added;
+  }
+
+  function favSave() {
+    if (favSaveQueued) return;
+    favSaveQueued = true;
+    RIC(() => {
+      favSaveQueued = false;
+      try {
+        localStorage.setItem(FAVS_KEY, JSON.stringify({ ts: Date.now(), codes: [...favLoad()] }));
       } catch { /* quota exceeded – skip silently */ }
     });
   }
@@ -289,6 +361,20 @@
       border-left: 3px solid #22c55e;
       box-shadow: 0 8px 24px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.06);
       backdrop-filter: blur(8px);
+      flex-direction: column;
+      align-items: center;
+      gap: 7px;
+    }
+    .kte-tip-preview {
+      height: 64px;
+      min-width: 64px;
+      max-width: 168px;
+      width: auto;
+      object-fit: contain;
+      display: block;
+    }
+    .kte-tip-label {
+      display: inline-flex;
       align-items: center;
       gap: 6px;
     }
@@ -350,11 +436,21 @@
       flex-shrink: 0;
       opacity: .85;
     }
+    .kte-ac-fav {
+      font-size: 10px;
+      line-height: 1;
+      flex-shrink: 0;
+    }
     .kte-src-7tv  { color: #4da6ff; }
     .kte-src-bttv { color: #ff6b6b; }
     .kte-src-ffz  { color: #c084fc; }
     .kte-src-other { color: #22c55e; }
 
+    .kte-tip-star,
+    .kte-picker-btn[data-kte-fav="1"]::after,
+    .kte-ac-fav {
+      color: #facc15;
+    }
     .kte-tip-code {
       color: #fff;
     }
@@ -444,6 +540,7 @@
       gap: 2px;
     }
     .kte-picker-btn {
+      position: relative;
       width: 38px;
       height: 38px;
       flex: 0 0 38px;
@@ -480,6 +577,16 @@
     }
     .kte-picker-btn img[data-kte-loaded="1"] {
       visibility: visible;
+    }
+    .kte-picker-btn[data-kte-fav="1"]::after {
+      content: '★';
+      position: absolute;
+      top: 1px;
+      right: 2px;
+      font-size: 9px;
+      line-height: 1;
+      pointer-events: none;
+      text-shadow: 0 1px 2px rgba(0,0,0,.9);
     }
     .kte-picker-empty {
       color: #71717a;
@@ -570,10 +677,14 @@
     return { '7TV': 'kte-src-7tv', BTTV: 'kte-src-bttv', FFZ: 'kte-src-ffz' }[name] ?? 'kte-src-other';
   }
 
-  function setEmoteTooltip(el, code, source) {
+  function setEmoteTooltip(el, code, source, url) {
     el.dataset.kteTip = `${code}  ·  ${source}`;
     el.dataset.kteTipCode = code;
     el.dataset.kteTipSource = source;
+    // kteTipCode picks up " + <code>" suffixes as zero-width emotes stack on
+    // this wrap; kteTipBase stays the single code the star state belongs to.
+    el.dataset.kteTipBase = code;
+    if (url) el.dataset.kteTipUrl = url;
   }
 
   function preconnectEmoteHosts() {
@@ -749,7 +860,7 @@
         url: `${BTTV_CDN}/${e.id}/2x${e.animated ? '.gif' : ''}`,
         source: 'BTTV',
         animated: e.animated,
-        zeroWidth: false,
+        zeroWidth: BTTV_ZERO_WIDTH.has(e.code),
       }]);
     }, options);
   }
@@ -768,7 +879,7 @@
           url: `${BTTV_CDN}/${e.id}/2x${e.animated ? '.gif' : ''}`,
           source: `BTTV (${platform})`,
           animated: e.animated,
-          zeroWidth: false,
+          zeroWidth: BTTV_ZERO_WIDTH.has(e.code),
         }]);
       }
       return [];
@@ -858,6 +969,10 @@
       const entries = [];
       for (const set of Object.values(data.sets ?? {})) {
         for (const e of (set.emoticons ?? [])) {
+          // FFZ "modifier" entries (ffzSpin, ffzRainbow, ffzX, …) are effects
+          // applied to the preceding emote, not emotes. They're over half of
+          // the global set and render as meaningless 32px icons on their own.
+          if (e.modifier) continue;
           const raw = e.urls?.['2'] ?? e.urls?.['1'];
           if (!raw) continue;
           entries.push([e.name, {
@@ -879,6 +994,7 @@
         const entries = [];
         for (const set of Object.values(data.sets ?? {})) {
           for (const e of (set.emoticons ?? [])) {
+            if (e.modifier) continue; // effect modifier, not an emote — see loadFFZGlobal
             const raw = e.urls?.['2'] ?? e.urls?.['1'];
             if (!raw) continue;
             entries.push([e.name, {
@@ -912,6 +1028,16 @@
     if (tipEl) tipEl.style.display = 'none';
   }
 
+  function positionTooltip(wrap) {
+    if (!tipEl || tipEl.style.display === 'none' || !wrap.isConnected) return;
+    const rect = wrap.getBoundingClientRect();
+    const tipRect = tipEl.getBoundingClientRect();
+    const left = Math.min(Math.max(rect.left + rect.width / 2, tipRect.width / 2 + 4), window.innerWidth - tipRect.width / 2 - 4);
+    const top = Math.max(4, rect.top - tipRect.height - 5);
+    tipEl.style.left = `${left}px`;
+    tipEl.style.top = `${top}px`;
+  }
+
   function showTooltip(wrap) {
     const text = wrap.dataset.kteTip;
     if (!text) return;
@@ -924,9 +1050,44 @@
 
     tipEl.textContent = '';
 
+    // Large preview above the label — the emote is already decoded from chat or
+    // the picker, so this costs nothing beyond layout.
+    const previewUrl = safeUrl(wrap.dataset.kteTipUrl ?? '');
+    if (previewUrl) {
+      const preview = document.createElement('img');
+      preview.className = 'kte-tip-preview';
+      preview.src = previewUrl;
+      preview.alt = '';
+      // CSS reserves the box, but the intrinsic width only lands on load —
+      // re-anchor once it does so a cold image doesn't leave the tip off-centre.
+      // isConnected gates the stale case: hovering another emote rebuilds the
+      // tip's children, and this image's late load must not drag the tip back
+      // to the emote it belonged to.
+      preview.addEventListener('load', () => {
+        if (preview.isConnected) positionTooltip(wrap);
+      });
+      // Drop the reserved box rather than show an empty frame on a dead URL.
+      preview.addEventListener('error', () => {
+        if (!preview.isConnected) return;
+        preview.remove();
+        positionTooltip(wrap);
+      });
+      tipEl.appendChild(preview);
+    }
+
+    const label = document.createElement('span');
+    label.className = 'kte-tip-label';
+
     const code = wrap.dataset.kteTipCode;
     const source = wrap.dataset.kteTipSource;
     if (code && source) {
+      if (favHas(wrap.dataset.kteTipBase ?? code)) {
+        const starEl = document.createElement('span');
+        starEl.className = 'kte-tip-star';
+        starEl.textContent = '★';
+        label.appendChild(starEl);
+      }
+
       const codeEl = document.createElement('span');
       codeEl.className = 'kte-tip-code';
       codeEl.textContent = code;
@@ -939,19 +1100,14 @@
       sourceEl.className = `kte-tip-source ${sourceClass(source)}`;
       sourceEl.textContent = source;
 
-      tipEl.append(codeEl, sepEl, sourceEl);
+      label.append(codeEl, sepEl, sourceEl);
     } else {
-      tipEl.textContent = text;
+      label.textContent = text;
     }
+    tipEl.appendChild(label);
 
     tipEl.style.display = 'inline-flex';
-
-    const rect = wrap.getBoundingClientRect();
-    const tipRect = tipEl.getBoundingClientRect();
-    const left = Math.min(Math.max(rect.left + rect.width / 2, tipRect.width / 2 + 4), window.innerWidth - tipRect.width / 2 - 4);
-    const top = Math.max(4, rect.top - tipRect.height - 5);
-    tipEl.style.left = `${left}px`;
-    tipEl.style.top = `${top}px`;
+    positionTooltip(wrap);
   }
 
   // ─── Emote context menu ───────────────────────────────────────────────────
@@ -997,6 +1153,21 @@
     catch { /* clipboard unavailable */ }
   }
 
+  // A star changes three things at once: the picker's badge and Favourites
+  // section, the autocomplete ranking, and the tooltip. Rebuild the picker even
+  // when its tab is hidden — pickerRefreshContent preserves the hidden state,
+  // and nothing else would rebuild it before the user switches back.
+  function favToggleAndRefresh(code) {
+    const added = favToggle(code);
+    const panel = document.getElementById('chat-emotes-picker-panel');
+    if (panel?.querySelector('#kte-picker-content')) {
+      pickerRefreshContent(panel);
+      pickerApplyActiveState(panel);
+    }
+    acRefreshOpen();
+    return added;
+  }
+
   function showEmoteMenu(x, y, code, emote) {
     hideEmoteMenu();
 
@@ -1022,6 +1193,7 @@
       menu.appendChild(btn);
     };
 
+    addItem(favHas(code) ? 'Remove from favourites' : 'Add to favourites', () => favToggleAndRefresh(code));
     addItem('Copy name', () => copyText(code));
     const imgUrl = safeUrl(emote.url);
     if (imgUrl) addItem('Copy image URL', () => copyText(imgUrl));
@@ -1041,7 +1213,7 @@
   function makeEmoteWrap(code, emote) {
     const wrap = document.createElement('span');
     wrap.className = 'kte-wrap';
-    setEmoteTooltip(wrap, code, emote.source);
+    setEmoteTooltip(wrap, code, emote.source, emote.url);
     wrap.addEventListener('mouseenter', () => showTooltip(wrap));
     wrap.addEventListener('mouseleave', hideTooltip);
     wrap.addEventListener('contextmenu', e => {
@@ -1265,12 +1437,14 @@
       }
       if (prefix.length >= AC_SCAN_CAP && substr.length >= AC_SCAN_CAP) break;
     }
-    // Most-used first within each group (stable sort keeps the index order —
-    // shortest, then alphabetical — as tiebreak); prefix matches always
-    // outrank substring matches.
-    const byUsage = (a, b) => usageCount(b.code) - usageCount(a.code);
-    prefix.sort(byUsage);
-    substr.sort(byUsage);
+    // Favourites first, then most-used, within each group (stable sort keeps
+    // the index order — shortest, then alphabetical — as tiebreak); prefix
+    // matches always outrank substring matches.
+    const byRank = (a, b) =>
+      (Number(favHas(b.code)) - Number(favHas(a.code)))
+      || (usageCount(b.code) - usageCount(a.code));
+    prefix.sort(byRank);
+    substr.sort(byRank);
     return prefix.concat(substr)
       .slice(0, AC_RESULTS)
       .map(entry => ({ code: entry.code, emote: entry.emote }));
@@ -1404,7 +1578,14 @@
       srcEl.className = `kte-ac-src ${sourceClass(emote.source)}`;
       srcEl.textContent = srcName;
 
-      row.append(img, nameEl, srcEl);
+      row.append(img, nameEl);
+      if (favHas(code)) {
+        const favEl = document.createElement('span');
+        favEl.className = 'kte-ac-fav';
+        favEl.textContent = '★';
+        row.appendChild(favEl);
+      }
+      row.appendChild(srcEl);
       row.addEventListener('mousedown', e => { e.preventDefault(); acCommit(code); });
       popup.appendChild(row);
     }
@@ -1512,7 +1693,8 @@
     btn.className = 'kte-picker-btn';
     btn.setAttribute('aria-label', `Insert ${code}`);
     btn.dataset.code = code;
-    setEmoteTooltip(btn, code, emote.source);
+    setEmoteTooltip(btn, code, emote.source, emote.url);
+    if (favHas(code)) btn.dataset.kteFav = '1';
 
     const animUrl = safeUrl(emote.url);
     const staticUrl = emote.staticUrl ? safeUrl(emote.staticUrl) : null;
@@ -1902,6 +2084,16 @@
       const b = e.target.closest('.kte-picker-btn');
       if (b?.dataset.code) pickerInsert(b.dataset.code);
     });
+    // Same menu as chat emotes — starring is the point, but copy/open work too.
+    grid.addEventListener('contextmenu', e => {
+      const b = e.target.closest('.kte-picker-btn');
+      const emote = b?.dataset.code ? emoteMap.get(b.dataset.code) : null;
+      if (!emote) return;
+      e.preventDefault();
+      e.stopPropagation();
+      hideTooltip();
+      showEmoteMenu(e.clientX, e.clientY, b.dataset.code, emote);
+    });
     return grid;
   }
 
@@ -1930,6 +2122,18 @@
       section.appendChild(footer);
     }
     return section;
+  }
+
+  // Starred emotes still present in the current emote set, newest star first,
+  // filtered by the active picker search.
+  function pickerFavouriteEmotes(lowerQuery) {
+    const favourites = [];
+    for (const code of favCodes()) {
+      if (lowerQuery && !code.toLowerCase().includes(lowerQuery)) continue;
+      const emote = emoteMap.get(code);
+      if (emote) favourites.push({ code, emote });
+    }
+    return favourites;
   }
 
   // Most recently inserted emotes still present in the current emote set,
@@ -1969,6 +2173,12 @@
     });
 
     let any = false;
+
+    const favourites = pickerFavouriteEmotes(lower);
+    if (favourites.length) {
+      any = true;
+      sectionsContainer.appendChild(pickerBuildSection('Favourites', favourites));
+    }
 
     const recent = pickerRecentEmotes(lower);
     if (recent.length) {
