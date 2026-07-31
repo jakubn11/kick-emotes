@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Kick Third-Party Emotes
 // @namespace    https://kick.com
-// @version      2.9.0
+// @version      2.9.1
 // @description  Adds BetterTTV, 7TV & FrankerFaceZ emotes to Kick.com chat — animated & zero-width emotes, usage-ranked autocomplete, favourites, hover previews, right-click emote menu, native picker tab with recents
 // @author       jakubnl94@gmail.com
 // @license      GPL-3.0-only
@@ -62,7 +62,22 @@
   ];
   const MSG_SELECTOR = MSG_SELECTORS.join(', ');
 
+  // Text inside these is chrome, not message content. Kick renders the chatter's
+  // name as a plain <button> inside the message row, so without the button rule
+  // a chatter called e.g. `Sadge` has their name replaced by an emote image and
+  // loses Kick's click-to-mention control. Both button selectors are deliberately
+  // narrow: the reply-preview button ("Replying to X: …") carries neither, so
+  // emotes still render inside reply quotes.
+  const SKIP_TEXT_SELECTORS = [
+    'a',
+    'button[data-prevent-expand]',           // current Kick DOM (2025+)
+    'button.font-bold',                      // class fallback for the same button
+  ];
+  const SKIP_TEXT_SELECTOR = SKIP_TEXT_SELECTORS.join(', ');
+
   const INPUT_SELECTORS = [
+    '[data-testid="chat-input"]',            // current Kick DOM (2025+)
+    '.editor-input[contenteditable]',        // Lexical editor class fallback
     '[data-chat-input]',
     '.chat-input-wrapper [contenteditable]',
     '.chat-input [contenteditable]',
@@ -284,6 +299,20 @@
   const emoteMap = new Map(); // code → { url, source, animated, zeroWidth }
   const memoryCache = new Map(); // provider key → { ts, data }, avoids sync localStorage parse on SPA nav
   const pendingLoads = new Map(); // provider key → Promise<entries>, deduplicates in-flight API fetches
+
+  // Each channel visit leaves three channel keys in memoryCache, each holding
+  // its provider's full entry array. Nothing ever dropped them, so a long
+  // channel-surfing session kept every set it had ever seen in memory. Cap it
+  // LRU-style with room for the three globals plus a handful of channels.
+  const MEMORY_CACHE_MAX = 24;
+
+  function memoryCacheTouch(key, record) {
+    memoryCache.delete(key);
+    memoryCache.set(key, record);
+    if (memoryCache.size > MEMORY_CACHE_MAX) {
+      memoryCache.delete(memoryCache.keys().next().value); // oldest use first
+    }
+  }
 
   let channelSlug = null;
   let chatObserver = null;
@@ -770,10 +799,14 @@
   }
 
   function cachedRecord(key) {
-    if (memoryCache.has(key)) return memoryCache.get(key);
+    if (memoryCache.has(key)) {
+      const cached = memoryCache.get(key);
+      memoryCacheTouch(key, cached); // re-mark as most recently used
+      return cached;
+    }
 
     const record = Cache.read(key);
-    if (record) memoryCache.set(key, record);
+    if (record) memoryCacheTouch(key, record);
     return record;
   }
 
@@ -806,7 +839,7 @@
       .then(entries => {
         const safeEntries = Array.isArray(entries) ? entries.filter(isValidCacheEntry) : [];
         const record = { ts: Date.now(), data: safeEntries };
-        memoryCache.set(key, record);
+        memoryCacheTouch(key, record);
         RIC(() => Cache.set(key, safeEntries));
         return safeEntries;
       })
@@ -1297,8 +1330,8 @@
       acceptNode(node) {
         const p = node.parentElement;
         if (!p) return NodeFilter.FILTER_REJECT;
-        // closest, not tagName — Kick may nest link text inside a span.
-        if (p.classList.contains('kte-wrap') || p.closest('a')) return NodeFilter.FILTER_REJECT;
+        // closest, not tagName — Kick nests both link and username text in spans.
+        if (p.classList.contains('kte-wrap') || p.closest(SKIP_TEXT_SELECTOR)) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       },
     });

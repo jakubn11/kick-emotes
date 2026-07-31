@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.1] - 2026-07-31
+
+### Fixed
+- **A chatter whose username matches an emote code no longer has their name replaced by an emote image.** Kick renders the username as a plain `<button>` inside the message row, and the text-node filter only skipped `<a>` ancestors, so the name was fair game for replacement — swapping it for a picture and taking Kick's click-to-mention control with it. Text inside the username button is now skipped via a `SKIP_TEXT_SELECTORS` list, with a class fallback alongside the attribute selector. Verified against Kick's live DOM: reply previews ("Replying to X: …") carry neither marker, so emotes still render inside reply quotes.
+
+### Changed
+- Added `[data-testid="chat-input"]` and `.editor-input[contenteditable]` as the leading chat-input selectors. Verified against Kick's live DOM, where all four previous selectors miss and only the generic `div[contenteditable="true"]` fallback matched — which would attach autocomplete to whatever contenteditable happened to come first in the document.
+- The in-memory provider cache is now capped at 24 entries, LRU. Every visited channel added three entries holding that provider's full emote array and nothing ever removed them, so a long channel-surfing session held on to every emote set it had seen.
+
 ## [2.9.0] - 2026-07-31
 
 ### Added

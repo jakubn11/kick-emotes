@@ -102,8 +102,11 @@ For channel emotes, the script currently tries Kick first and Twitch fallback wh
 Kick is a single-page app and may change class names. The fragile selectors live near the top of the userscript:
 
 - `MSG_SELECTORS`
+- `SKIP_TEXT_SELECTORS` — ancestors whose text is chrome, not message content. The username is a plain `<button>` inside the message row, so without it a chatter named after an emote gets their name replaced by an image. Keep the button rules narrow: the reply-preview button carries neither `data-prevent-expand` nor `font-bold`, which is what lets emotes still render inside reply quotes.
 - `INPUT_SELECTORS`
 - `NON_CHANNEL_SLUGS`
+
+These can be checked against the live site without a Kick account: open a **live** channel (an offline one has no chat DOM at all), then in the console count hits per selector and walk a message row's text nodes through the same `acceptNode` logic `processMessageEl` uses. Measured this way in July 2026: only `MSG_SELECTORS[0]`/`[1]` and the last `INPUT_SELECTORS` fallback matched anything, and chat produced roughly 5 added message elements and 22 mutation batches per 20 s — the body-wide `MutationObserver` costs well under a millisecond of selector work over that window, so it is not worth scoping to the chat container.
 
 When fixing Kick DOM breakage, prefer adding fallback selectors rather than replacing working selectors. After selector changes, manually test:
 
