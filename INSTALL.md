@@ -62,10 +62,12 @@ Global sets are each provider's small curated default; channel sets are where th
 
 - On every Kick channel page the script fetches emotes from all three services.
 - Chat messages are scanned as they arrive; any matching word is replaced with the emote image.
+- Start typing an emote name in the chat input to get an autocomplete popup — ↑/↓ to navigate, Tab or Enter to insert, Esc to close. Favourites rank first, then your most-used emotes.
 - Hover over an emote to see a large preview with its name and source; right-click it to favourite it, copy the name/image URL, or open its provider page.
 - Favourited emotes get a ★, a **Favourites** section at the top of the picker, and first place in autocomplete.
 - Open Kick's emote picker and choose the **7TV+** tab to browse/search loaded third-party emotes; clicking one inserts its text code into chat, and right-clicking one opens the same menu as in chat. The picker starts with 40 matches per provider for performance, offers **Load more** per provider, and search narrows across all loaded emotes.
-- Navigating between channels reloads the channel-specific emote sets automatically.
+- The chips at the top of the **7TV+** tab are the settings: turn 7TV, BTTV or FFZ off individually, and set the chat emote size (22px, 28px default, or 36px). Both apply immediately, including to messages already on screen, and are remembered locally.
+- Navigating between channels reloads the channel-specific emote sets automatically. Kick's popout chat (`/popout/<channel>/chat`) is supported too.
 
 ## Updating
 
@@ -76,6 +78,7 @@ The userscript metadata includes `@updateURL` and `@downloadURL` pointing at the
 | Symptom | Fix |
 |---------|-----|
 | No emotes appear | Open your browser's DevTools → Console on kick.com and look for `[KickEmotes]` log lines. If missing, check the extension is enabled for kick.com. |
+| Emotes from one provider are missing | That provider may be switched off — check its chip at the top of the **7TV+** picker tab. |
 | Emotes appear for global but not channel | The streamer may not have BTTV/7TV/FFZ set up for their Kick channel. |
 | 7TV+ tab missing | Close and reopen Kick's native emote picker after the `[KickEmotes] Ready` log appears. |
 | Images broken after Kick update | Kick may have changed their chat DOM class names. Open an issue with the new class names found in the browser inspector. |

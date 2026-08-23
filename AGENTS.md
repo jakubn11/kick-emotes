@@ -132,11 +132,12 @@ When fixing Kick DOM breakage, prefer adding fallback selectors rather than repl
 
 ## Emote Rendering Notes
 
-- Emote images use `.kte-img` with a 28px height.
-- Zero-width emotes overlay the previous emote via `.kte-zw` — 7TV emotes flagged by the provider, plus the BTTV codes in `BTTV_ZERO_WIDTH`.
+- Emote images use `.kte-img`. 28px is the *default* height only — the size setting rewrites `.kte-img` / `.kte-zw` through `_sizeStyle`, so don't treat 28 as fixed or hard-code it anywhere else.
+- Zero-width emotes overlay the previous emote via `.kte-zw` — 7TV emotes flagged by the provider, plus the BTTV codes in `BTTV_ZERO_WIDTH`. The whitespace token preceding an absorbed overlay is dropped: the overlay is absolutely positioned, so that space renders as a stray gap (chat is `pre-wrap`) and orphans on un-render, growing by one space per toggle cycle.
+- Every emote `img` keeps its code in `alt`, on `.kte-zw` overlays as much as on `.kte-img`. That is not just for copy/paste — `unrenderEmoteWraps()` reconstructs the original message tokens from the alts when a provider is switched off.
 - `makeEmoteWrap` returns a plain text node when `safeUrl()` rejects the emote's URL. Only elements may anchor a zero-width overlay — a text node has no `dataset` and throws on `appendChild`, which would abort rendering for the whole message. Keep the element check on the zero-width anchor.
 - Text nodes are split on whitespace; exact token matches are replaced. Text under a `SKIP_TEXT_SELECTORS` ancestor (links, the username button) is left alone — see DOM And Routing Notes.
-- Processed message elements receive `data-kte-version="<emoteVersion>"` to avoid duplicate rendering; bumping `emoteVersion` (provider refresh, channel change) makes them eligible for reprocessing.
+- Processed message elements receive `data-kte-version="<emoteVersion>"` to avoid duplicate rendering; bumping `emoteVersion` (provider refresh, channel change, provider toggled in settings) makes them eligible for reprocessing.
 
 Be careful when changing text processing: chat messages can contain links, existing elements, and text nodes inserted incrementally by the Kick frontend.
 

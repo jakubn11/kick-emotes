@@ -1840,7 +1840,7 @@
 
     const footer = document.createElement('div');
     footer.id = 'kte-ac-footer';
-    footer.textContent = '↑↓ navigate  ·  Tab select  ·  Esc close';
+    footer.textContent = '↑↓ navigate  ·  Tab/Enter select  ·  Esc close';
     popup.appendChild(footer);
 
     overlayParent().appendChild(popup);
