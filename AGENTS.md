@@ -27,13 +27,17 @@ Manual testing is required in a browser with a userscript manager installed:
 2. Open a Kick channel page.
 3. Check the browser developer console for `[KickEmotes]` log lines.
 4. Verify global and channel emotes render in chat.
-5. Verify autocomplete attaches to the chat input and supports arrow navigation, Tab selection, and Esc close.
+5. Verify autocomplete attaches to the chat input and supports arrow navigation, Tab selection, Enter selection (and plain Enter sending with nothing highlighted), and Esc close.
 6. Navigate between Kick channels and confirm channel-specific emotes reload.
 7. Right-click a rendered emote and verify the context menu (favourite, copy name, copy image URL, open provider page).
 8. Insert a few emotes, reopen the picker's 7TV+ tab, and verify the "Recently used" section and usage-ranked autocomplete.
 9. Favourite an emote from chat and from the picker; verify the ★ appears in the tooltip, the autocomplete row, and the picker badge, that the "Favourites" section updates while the picker is open, and that unstarring reverses all of it.
 10. Hover an emote in chat and in the picker and verify the tooltip shows the large preview without jumping once the image loads.
-11. Post `cvMask` after another emote in a channel with BTTV loaded and verify it overlays rather than sitting beside it.
+11. Hover an emote in a busy chat without moving the cursor: the tooltip should track the emote as messages scroll it up, and disappear once the emote scrolls out or its row is recycled.
+12. Toggle a provider chip off and on in the picker: its section and emotes should vanish from the picker, autocomplete, and *already-rendered* chat messages, and come back intact. Toggle repeatedly and confirm no spaces accumulate around zero-width emotes.
+13. Change the emote size chips and confirm chat emotes resize immediately (the picker grid stays at 32px by design) and that the choice survives a reload.
+14. Open `/popout/<channel>/chat` and confirm channel emotes load, not just globals.
+15. Post `cvMask` after another emote in a channel with BTTV loaded and verify it overlays rather than sitting beside it.
 
 ## Userscript Metadata
 
@@ -55,6 +59,8 @@ Do not add `Co-Authored-By:` trailers to git commits.
 - Cache helper using `localStorage` keys prefixed with `kte_v3_` (old-prefix and long-expired keys are swept once per page load)
 - Local emote-usage tracker (`kte_v2_usage`) powering autocomplete ranking and the picker's "Recently used" section
 - Local favourites store (`kte_v2_favs`) powering the picker's "Favourites" section, the top of the autocomplete ranking, and the ★ markers
+- Local settings store (`kte_v2_settings`) — per-provider visibility and chat emote size — surfaced as the chip row at the top of the picker tab
+- Module-level provider layers (`loadedProviders` / `activeLoaders`) and `rebuildEmoteMap()`, so a settings change can refilter `emoteMap` without re-running `init()`
 - Emote context menu (`#kte-menu`) on right-clicked chat **and picker** emotes
 - Provider loaders for BTTV, 7TV, and FFZ
 - DOM message processing and emote replacement
@@ -77,7 +83,16 @@ Each provider loader should add `[code, emote]` entries through `cachedLoad()`.
 Two separate namespaces, deliberately:
 
 - **`CACHE_PREFIX` (`kte_v3_`)** — provider data. Bump the prefix whenever the emote schema *or the meaning of a field* changes, so stale entries are refetched instead of served for up to their TTL. (`v2` added `staticUrl`; `v3` gave BTTV entries real `zeroWidth` flags.) `sweepCache` deletes keys from older prefixes.
-- **`USAGE_KEY` / `FAVS_KEY` (`kte_v2_*`)** — user state. These are listed in `PRESERVED_KEYS` and are skipped by the sweep, so a cache-prefix bump never wipes someone's favourites or ranking. Do not derive them from `CACHE_PREFIX`.
+- **`USAGE_KEY` / `FAVS_KEY` / `SETTINGS_KEY` (`kte_v2_*`)** — user state. All three are listed in `PRESERVED_KEYS` and are skipped by the sweep, so a cache-prefix bump never wipes someone's favourites, ranking, or settings. Do not derive them from `CACHE_PREFIX`.
+
+### Settings
+
+`kte_v2_settings` holds `{ providers: { '7TV': bool, BTTV: bool, FFZ: bool }, size: 22 | 28 | 36 }`. Two things are load-bearing:
+
+- **Hidden providers are still fetched.** `allLoaders` runs every provider regardless; `rebuildEmoteMap()` is what filters by `providerEnabled()`. The fetches are cache-backed and cheap, and keeping the layers in `loadedProviders` is what makes re-enabling instant. Do not "optimize" this into skipping the fetch — re-enabling would then need a refetch, and the obvious way to trigger one (`init()`) tears down the picker the user is clicking in.
+- **Turning a provider off has to un-render.** Message processing only ever goes text → image, so `unrenderEmoteWraps()` walks `.kte-wrap` elements back to text before the reprocess. It rebuilds tokens from each `img`'s `alt`, which is why the alt must stay set to the emote code on both `.kte-img` and `.kte-zw`. `processTextNode` drops the whitespace preceding an absorbed overlay for the same reason: left in, it orphans on un-render and grows the gap by one space on every toggle cycle. Round-trip stability was verified against a live page across three render/un-render cycles.
+
+Emote size is written into its own `<style>` element (`_sizeStyle`) that `applyEmoteSize()` rewrites — a later sheet at equal specificity beats the base `.kte-img` / `.kte-zw` rules without `!important`, and it keeps the palette rule below (no CSS custom properties) intact.
 
 ## External APIs
 
@@ -104,7 +119,7 @@ Kick is a single-page app and may change class names. The fragile selectors live
 - `MSG_SELECTORS`
 - `SKIP_TEXT_SELECTORS` — ancestors whose text is chrome, not message content. The username is a plain `<button>` inside the message row, so without it a chatter named after an emote gets their name replaced by an image. Keep the button rules narrow: the reply-preview button carries neither `data-prevent-expand` nor `font-bold`, which is what lets emotes still render inside reply quotes.
 - `INPUT_SELECTORS`
-- `NON_CHANNEL_SLUGS`
+- `NON_CHANNEL_SLUGS` — plus the popout special case in `currentChannelSlug()`: Kick's popout chat is `/popout/<channel>/chat`, so the channel is the *second* segment there. Verified against the live page — it carries the same chat DOM as embedded chat, so the only thing that ever broke was the slug.
 
 These can be checked against the live site without a Kick account: open a **live** channel (an offline one has no chat DOM at all), then in the console count hits per selector and walk a message row's text nodes through the same `acceptNode` logic `processMessageEl` uses. Measured this way in July 2026: only `MSG_SELECTORS[0]`/`[1]` and the last `INPUT_SELECTORS` fallback matched anything, and chat produced roughly 5 added message elements and 22 mutation batches per 20 s — the body-wide `MutationObserver` costs well under a millisecond of selector work over that window, so it is not worth scoping to the chat container.
 
@@ -133,6 +148,7 @@ Autocomplete is intentionally lightweight and local:
 - It displays up to 8 results.
 - It supports contenteditable inputs and textarea/input fallbacks.
 - It uses `document.execCommand('insertText')` for contenteditable insertion to preserve frontend reactivity.
+- Tab completes the top match; Enter completes only an explicitly focused row and otherwise closes the popup and lets Kick send. Closing on Enter is not cosmetic: Kick clears the Lexical editor programmatically, which fires no `input` event, so nothing else would take the popup down.
 
 If modifying autocomplete, test both insertion and keyboard handling in the actual Kick chat input.
 
@@ -208,7 +224,7 @@ family palette — do not add more without the same kind of justification.
 - **Hover states:** rows and menu items take a `rgba(34,197,94,.1)` background with no border change. The picker's **Load more** — the one accent-filled button — uses the family's selected-chip treatment instead: `rgba(34,197,94,.14)` fill / `rgba(34,197,94,.5)` border / `#4ade80` text at rest, hovering to `.18` / `.6`. Keep it in step with kick-fullscreen-chat's `.kfc-settings-chip.kfc-selected` and kick-quality-saver's `.kqs-chip[data-active]`.
 - **Transitions:** `transition: background .08s` on interactive rows/buttons (the picker uses `.12s ease`).
 - **No drop shadows in green.** Shadows are always `rgba(0,0,0,…)`.
-- **Tooltips** (`#kte-tip`): use the shared `showTooltip(el)` / `hideTooltip()` helpers. Wire via `data-kte-tip` attribute and `mouseenter`/`mouseleave` events. Do not use native `title` attributes on any script-injected element.
+- **Tooltips** (`#kte-tip`): use the shared `showTooltip(el)` / `hideTooltip()` helpers. Wire via `data-kte-tip` attribute and `mouseenter`/`mouseleave` events. Do not use native `title` attributes on any script-injected element. The tooltip is `position: fixed` and tracks its anchor through the module-level `tipAnchor` plus a capture-phase `scroll` listener — `mouseenter`/`mouseleave` alone are not enough, because chat scrolls under a stationary cursor and a recycled row is removed without ever firing `mouseleave`.
 
 ### Reference implementations
 
@@ -216,6 +232,7 @@ family palette — do not add more without the same kind of justification.
 - `#kte-ac` — autocomplete dropdown (green top border + green header label)
 - `#kte-menu` — emote context menu (green left border stripe)
 - `.kte-picker-more` — picker action button (green background tint, green border)
+- `.kte-picker-settings` / `.kte-chip` — the picker's settings row. It counts as its own component for the one-accent rule: its accent is the selected-chip treatment (matching kick-fullscreen-chat's `.kfc-settings-chip.kfc-selected`), which is why green appears here as well as on `.kte-picker-more`. Provider chips override it with their own brand colour when enabled — same justification as the source badges.
 
 ## Documentation
 

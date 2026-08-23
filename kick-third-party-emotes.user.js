@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Kick Third-Party Emotes
 // @namespace    https://kick.com
-// @version      2.9.1
-// @description  Adds BetterTTV, 7TV & FrankerFaceZ emotes to Kick.com chat — animated & zero-width emotes, usage-ranked autocomplete, favourites, hover previews, right-click emote menu, native picker tab with recents
+// @version      2.10.0
+// @description  Adds BetterTTV, 7TV & FrankerFaceZ emotes to Kick.com chat — animated & zero-width emotes, usage-ranked autocomplete, favourites, hover previews, right-click emote menu, native picker tab with recents, per-provider toggles & emote size
 // @author       jakubnl94@gmail.com
 // @license      GPL-3.0-only
 // @icon         https://raw.githubusercontent.com/jakubn11/kick-third-party-emotes/main/icon.svg
@@ -131,7 +131,8 @@
   // cache-prefix bump. sweepCache skips these keys.
   const USAGE_KEY = 'kte_v2_usage';
   const FAVS_KEY = 'kte_v2_favs';
-  const PRESERVED_KEYS = new Set([USAGE_KEY, FAVS_KEY]);
+  const SETTINGS_KEY = 'kte_v2_settings';
+  const PRESERVED_KEYS = new Set([USAGE_KEY, FAVS_KEY, SETTINGS_KEY]);
 
   // Every visited channel leaves kte_v3_*_c_<slug> keys behind and localStorage
   // never evicts them, so a long tail of channels would eventually hit quota
@@ -294,6 +295,55 @@
     });
   }
 
+  // ─── Settings ─────────────────────────────────────────────────────────────
+  // Local-only preferences, surfaced as chips at the top of the picker's 7TV+
+  // tab. User state like usage and favourites, so it keeps its own stable key
+  // and is exempt from the cache sweep.
+
+  const PROVIDERS = ['7TV', 'BTTV', 'FFZ'];
+  const EMOTE_SIZES = [22, 28, 36];
+  const DEFAULT_EMOTE_SIZE = 28;
+
+  let settings = null;
+  let settingsSaveQueued = false;
+
+  function settingsLoad() {
+    if (settings) return settings;
+    settings = { providers: {}, size: DEFAULT_EMOTE_SIZE };
+    for (const provider of PROVIDERS) settings.providers[provider] = true;
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw);
+        for (const provider of PROVIDERS) {
+          if (typeof saved?.providers?.[provider] === 'boolean') {
+            settings.providers[provider] = saved.providers[provider];
+          }
+        }
+        if (EMOTE_SIZES.includes(saved?.size)) settings.size = saved.size;
+      }
+    } catch { /* corrupted record – fall back to defaults */ }
+    return settings;
+  }
+
+  // Anything outside the known set — a future provider, or the 'Other' bucket
+  // sourceName falls back to — stays visible rather than silently disappearing.
+  function providerEnabled(provider) {
+    return settingsLoad().providers[provider] ?? true;
+  }
+
+  function settingsSave() {
+    if (settingsSaveQueued) return;
+    settingsSaveQueued = true;
+    RIC(() => {
+      settingsSaveQueued = false;
+      try {
+        const { providers, size } = settingsLoad();
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ts: Date.now(), providers, size }));
+      } catch { /* quota exceeded – skip silently */ }
+    });
+  }
+
   // ─── State ────────────────────────────────────────────────────────────────
 
   const emoteMap = new Map(); // code → { url, source, animated, zeroWidth }
@@ -321,6 +371,7 @@
   let emoteVersion = 0;
   let visibleRefreshTimer = null;
   let pickerInjectTimer = null;
+  let pickerDeferredRefreshTimer = null;
   let messageProcessQueue = [];
   let messageProcessQueued = false;
   let lastNavigationAt = 0;
@@ -331,6 +382,7 @@
   let acMatches = [];
   let acInput = null;
   let tipEl = null;
+  let tipAnchor = null; // element the open tooltip is positioned against
 
   // Tracks the picker content currently holding viewport scroll + window resize
   // listeners. Lets handleNavigation force-detach even if Kick already removed
@@ -617,6 +669,79 @@
       pointer-events: none;
       text-shadow: 0 1px 2px rgba(0,0,0,.9);
     }
+    /* Settings row at the top of the picker tab */
+    .kte-picker-settings {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+      /* Negative margin + own padding so the row covers #kte-picker-content's
+         top padding when stuck, instead of letting emotes scroll past above it. */
+      margin: -8px 0 2px;
+      padding: 8px 0;
+      background: rgba(16,16,19,.92);
+      backdrop-filter: blur(8px);
+    }
+    .kte-chip {
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 999px;
+      background: transparent;
+      color: rgba(255,255,255,.25);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1;
+      padding: 5px 9px;
+      cursor: pointer;
+      transition: background .12s ease, border-color .12s ease, color .12s ease;
+    }
+    .kte-chip:hover,
+    .kte-chip:focus-visible {
+      background: rgba(255,255,255,.06);
+      outline: none;
+    }
+    .kte-chip[data-on="1"] {
+      background: rgba(34,197,94,.14);
+      border-color: rgba(34,197,94,.5);
+      color: #4ade80;
+    }
+    .kte-chip[data-on="1"]:hover,
+    .kte-chip[data-on="1"]:focus-visible {
+      background: rgba(34,197,94,.18);
+      border-color: rgba(34,197,94,.6);
+    }
+    /* An enabled provider chip wears its own brand colour, for the same reason
+       the source badges do — telling providers apart at a glance is the point. */
+    .kte-chip[data-on="1"][data-provider="7TV"] {
+      background: rgba(77,166,255,.14); border-color: rgba(77,166,255,.5); color: #4da6ff;
+    }
+    .kte-chip[data-on="1"][data-provider="7TV"]:hover {
+      background: rgba(77,166,255,.2); border-color: rgba(77,166,255,.6);
+    }
+    .kte-chip[data-on="1"][data-provider="BTTV"] {
+      background: rgba(255,107,107,.14); border-color: rgba(255,107,107,.5); color: #ff6b6b;
+    }
+    .kte-chip[data-on="1"][data-provider="BTTV"]:hover {
+      background: rgba(255,107,107,.2); border-color: rgba(255,107,107,.6);
+    }
+    .kte-chip[data-on="1"][data-provider="FFZ"] {
+      background: rgba(192,132,252,.14); border-color: rgba(192,132,252,.5); color: #c084fc;
+    }
+    .kte-chip[data-on="1"][data-provider="FFZ"]:hover {
+      background: rgba(192,132,252,.2); border-color: rgba(192,132,252,.6);
+    }
+    .kte-settings-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: rgba(255,255,255,.25);
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      margin-left: 4px;
+    }
+
     .kte-picker-empty {
       color: #71717a;
       font-size: 12px;
@@ -679,6 +804,20 @@
     }
   `;
   (document.head ?? document.documentElement).appendChild(_style);
+
+  // Emote size is a user setting, so its rules live in their own sheet that gets
+  // rewritten on change. A later sheet at equal specificity wins, so this
+  // overrides the .kte-img / .kte-zw heights above without !important.
+  const _sizeStyle = document.createElement('style');
+  (document.head ?? document.documentElement).appendChild(_sizeStyle);
+
+  function applyEmoteSize() {
+    const px = settingsLoad().size;
+    _sizeStyle.textContent = `
+    .kte-img { height: ${px}px; max-width: ${px * 4}px; }
+    .kte-zw { height: ${px}px; }
+  `;
+  }
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -872,6 +1011,24 @@
     return fetchAndCache(key, fetcher);
   }
 
+  // Provider layers for the current channel, kept at module scope so a settings
+  // change can rebuild emoteMap without re-running init() — which would tear the
+  // picker down under the user while they click a chip inside it.
+  let loadedProviders = new Map(); // loader key → validated entries
+  let activeLoaders = [];          // loader descriptors for the current channel
+
+  // Channel emotes override globals; globals never overwrite an existing entry.
+  // Resolution order is non-deterministic, so rebuild from the known layers
+  // whenever a provider updates or is toggled in settings.
+  function rebuildEmoteMap() {
+    emoteMap.clear();
+    for (const loader of activeLoaders) {
+      if (!providerEnabled(loader.provider)) continue;
+      const entries = loadedProviders.get(loader.key);
+      if (entries) mergeEmoteEntries(entries, loader.isChannel);
+    }
+  }
+
   function mergeEmoteEntries(entries, isChannel) {
     if (!Array.isArray(entries) || !entries.length) return 0;
     let added = 0;
@@ -1059,11 +1216,17 @@
 
   function hideTooltip() {
     if (tipEl) tipEl.style.display = 'none';
+    tipAnchor = null;
   }
 
   function positionTooltip(wrap) {
-    if (!tipEl || tipEl.style.display === 'none' || !wrap.isConnected) return;
+    if (!tipEl || tipEl.style.display === 'none') return;
+    // The anchor can vanish under a stationary cursor — chat's virtual list
+    // recycles rows out from under it, and removing an element fires no
+    // mouseleave — which would strand the tooltip until the next hover.
+    if (!wrap.isConnected) { hideTooltip(); return; }
     const rect = wrap.getBoundingClientRect();
+    if (rect.bottom < 0 || rect.top > window.innerHeight) { hideTooltip(); return; }
     const tipRect = tipEl.getBoundingClientRect();
     const left = Math.min(Math.max(rect.left + rect.width / 2, tipRect.width / 2 + 4), window.innerWidth - tipRect.width / 2 - 4);
     const top = Math.max(4, rect.top - tipRect.height - 5);
@@ -1140,8 +1303,18 @@
     tipEl.appendChild(label);
 
     tipEl.style.display = 'inline-flex';
+    tipAnchor = wrap;
     positionTooltip(wrap);
   }
+
+  // #kte-tip is position:fixed, so chat scrolling past a hovered emote (or the
+  // picker grid scrolling under the cursor) leaves the tooltip behind where the
+  // emote used to be. Re-anchor on any scroll while one is open.
+  function repositionTooltip() {
+    if (tipAnchor) positionTooltip(tipAnchor);
+  }
+  document.addEventListener('scroll', repositionTooltip, { capture: true, passive: true });
+  window.addEventListener('resize', repositionTooltip, { passive: true });
 
   // ─── Emote context menu ───────────────────────────────────────────────────
 
@@ -1288,9 +1461,22 @@
 
       if (emote) {
         if (emote.zeroWidth && lastWrap) {
-          // Overlay this image centred on the previous emote wrap
+          // Overlay this image centred on the previous emote wrap.
+          // The whitespace token that preceded the overlay is dropped: the
+          // overlay is absolutely positioned, so that space renders as a stray
+          // gap after the emote, and un-rendering the message (provider toggled
+          // off) would leave it orphaned and grow the run by one space on every
+          // render/un-render cycle.
+          const prev = frag.lastChild;
+          if (prev?.nodeType === Node.TEXT_NODE && !prev.textContent.trim()) frag.removeChild(prev);
           const zwUrl = safeUrl(emote.url);
-          if (!zwUrl) continue;
+          if (!zwUrl) {
+            // Same fallback makeEmoteWrap uses for a rejected URL: show the code
+            // as text rather than dropping the token out of the message.
+            frag.appendChild(document.createTextNode(token));
+            lastWrap = null;
+            continue;
+          }
           const zw = document.createElement('img');
           zw.src = zwUrl;
           zw.alt = token;
@@ -1357,6 +1543,33 @@
     }
 
     RIC(step);
+  }
+
+  // Turning a provider off has to put its already-rendered emotes back to text:
+  // processing only ever goes text → image, so nothing else would undo them. Each
+  // img's alt is its emote code — including every zero-width overlay stacked on
+  // the wrap — so the original tokens reconstruct exactly. Clearing the version
+  // mark and normalizing makes the element eligible for a clean reprocess.
+  function unrenderEmoteWraps() {
+    for (const el of document.querySelectorAll(MSG_SELECTOR)) {
+      const wraps = el.querySelectorAll('.kte-wrap');
+      if (!wraps.length) continue;
+      for (const wrap of wraps) {
+        const codes = [...wrap.querySelectorAll('img')].map(img => img.alt).filter(Boolean);
+        wrap.replaceWith(document.createTextNode(codes.join(' ')));
+      }
+      el.normalize();
+      delete el.dataset.kteVersion;
+    }
+  }
+
+  function applyProviderSettings() {
+    rebuildEmoteMap();
+    emoteVersion++;
+    hideTooltip();
+    unrenderEmoteWraps();
+    queueVisibleEmoteRefresh(0);
+    acRefreshOpen();
   }
 
   function queueVisibleEmoteRefresh(delay = 0) {
@@ -1571,6 +1784,9 @@
 
   function acRender(matches, inputEl) {
     acHide();
+    // Filter before storing: acMatches indexes into the rendered rows, so a row
+    // skipped further down would make arrow-key focus commit the wrong emote.
+    matches = matches.filter(m => safeUrl(m.emote.url));
     if (!matches.length) return;
     acMatches = matches;
     acInput = inputEl;
@@ -1592,7 +1808,6 @@
       row.className = 'kte-ac-row';
 
       const acUrl = safeUrl(emote.url);
-      if (!acUrl) continue;
       const img = document.createElement('img');
       img.src = acUrl;
       img.alt = code;
@@ -1648,6 +1863,15 @@
       // No explicit focus → complete the top match (matches Twitch/7TV behaviour)
       const pick = acMatches[acFocusIdx >= 0 ? acFocusIdx : 0];
       if (pick) { e.preventDefault(); acCommit(pick.code); }
+    }
+    else if (e.key === 'Enter') {
+      // An explicitly focused row means the user navigated to it — insert it
+      // instead of sending. With no focus, let the message send, but close the
+      // popup: Kick clears the Lexical editor programmatically, which fires no
+      // input event, so the suggestions would hang around over an empty input.
+      const pick = acFocusIdx >= 0 ? acMatches[acFocusIdx] : null;
+      if (pick) { e.preventDefault(); acCommit(pick.code); }
+      else acHide();
     }
     else if (e.key === 'Escape') { e.preventDefault(); acHide(); }
   }
@@ -1706,6 +1930,7 @@
   const PICKER_ROUTE_INJECT_DELAY = 700;
   const PICKER_APPEND_REFRESH_DELAY = 260;
   const PICKER_ACTIVE_PROVIDER_DEFER_WINDOW = 15000;
+  const PICKER_DEFERRED_RETRY_DELAY = 2000;
   const ROUTE_CHAT_REFRESH_DELAY = 500;
   const PICKER_APPEND_CHUNK = 10;
   const PICKER_APPEND_DELAY = 24;
@@ -2183,9 +2408,78 @@
     return recent;
   }
 
+  function pickerChipState(chip, on) {
+    chip.dataset.on = on ? '1' : '0';
+    chip.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
+
+  function pickerBuildChip(label, tip) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'kte-chip';
+    chip.textContent = label;
+    chip.dataset.kteTip = tip;
+    chip.addEventListener('mouseenter', () => showTooltip(chip));
+    chip.addEventListener('mouseleave', hideTooltip);
+    // Keep the chat input focused, same as the grid buttons and Load more.
+    chip.addEventListener('mousedown', e => e.preventDefault());
+    return chip;
+  }
+
+  // Settings row pinned to the top of the tab: which providers render, and how
+  // big emotes are in chat. Both apply immediately — no reload, no channel change.
+  function pickerBuildSettings() {
+    const row = document.createElement('div');
+    row.className = 'kte-picker-settings';
+
+    for (const provider of PROVIDERS) {
+      const chip = pickerBuildChip(provider, `Show or hide ${provider} emotes`);
+      chip.dataset.provider = provider;
+      pickerChipState(chip, providerEnabled(provider));
+      chip.addEventListener('click', () => {
+        const store = settingsLoad();
+        store.providers[provider] = !providerEnabled(provider);
+        settingsSave();
+        applyProviderSettings(); // hides the tooltip and re-renders chat
+        // The section list changes, so the tab content has to be rebuilt.
+        const panel = document.getElementById('chat-emotes-picker-panel');
+        if (panel) {
+          pickerRefreshContent(panel);
+          pickerApplyActiveState(panel);
+        }
+      });
+      row.appendChild(chip);
+    }
+
+    const label = document.createElement('span');
+    label.className = 'kte-settings-label';
+    label.textContent = 'Size';
+    row.appendChild(label);
+
+    for (const px of EMOTE_SIZES) {
+      const chip = pickerBuildChip(`${px}px`, `Show chat emotes at ${px}px`);
+      chip.dataset.size = String(px);
+      pickerChipState(chip, settingsLoad().size === px);
+      chip.addEventListener('click', () => {
+        settingsLoad().size = px;
+        settingsSave();
+        applyEmoteSize();
+        // Size is pure CSS — repaint the chips in place rather than rebuilding
+        // the whole grid for it.
+        row.querySelectorAll('.kte-chip[data-size]').forEach(other => {
+          pickerChipState(other, Number(other.dataset.size) === px);
+        });
+      });
+      row.appendChild(chip);
+    }
+
+    return row;
+  }
+
   function pickerBuildContent(query) {
     const wrap = document.createElement('div');
     wrap.id = 'kte-picker-content';
+    wrap.appendChild(pickerBuildSettings());
     const sectionsContainer = document.createElement('div');
     sectionsContainer.className = 'grid gap-2';
 
@@ -2229,7 +2523,11 @@
     if (!any) {
       const msg = document.createElement('p');
       msg.className = 'kte-picker-empty';
-      msg.textContent = query ? 'No matching emotes' : 'Emotes loading…';
+      msg.textContent = query
+        ? 'No matching emotes'
+        : (PROVIDERS.every(provider => !providerEnabled(provider))
+          ? 'Every provider is hidden — turn one back on above'
+          : 'Emotes loading…');
       wrap.appendChild(msg);
     } else {
       wrap.appendChild(sectionsContainer);
@@ -2291,19 +2589,6 @@
     return [...parts.mainGrid.children].filter(child => (
       child !== parts.header && child !== pickerContent
     ));
-  }
-
-  function pickerUnlockElementHeight(el) {
-    if (!el?._kteHeightLock) return;
-    el.style.height = el._kteHeightLock.height;
-    el.style.minHeight = el._kteHeightLock.minHeight;
-    el.style.maxHeight = el._kteHeightLock.maxHeight;
-    delete el._kteHeightLock;
-  }
-
-  function pickerUnlockSize(panel, parts) {
-    pickerUnlockElementHeight(parts?.scrollViewport);
-    pickerUnlockElementHeight(panel);
   }
 
   function pickerRefreshContent(panel) {
@@ -2370,9 +2655,6 @@
         delete child.dataset.kteNativeHidden;
       }
     }
-    if (!active) {
-      pickerUnlockSize(panel, parts);
-    }
   }
 
   function queueProviderPickerRefresh() {
@@ -2387,6 +2669,17 @@
 
     if (deferActiveRefresh) {
       content._kteDeferredProviderRefresh = true;
+      // Only another provider resolving would call this again. If this was the
+      // last one and the user stays on the tab, the picker would keep showing
+      // the pre-refresh set — re-check once the defer reason has had time to
+      // clear (the navigation window expires; appends and image loads finish).
+      if (!pickerDeferredRefreshTimer) {
+        const seq = initSeq;
+        pickerDeferredRefreshTimer = setTimeout(() => {
+          pickerDeferredRefreshTimer = null;
+          if (seq === initSeq) queueProviderPickerRefresh();
+        }, PICKER_DEFERRED_RETRY_DELAY);
+      }
       return;
     }
 
@@ -2536,11 +2829,13 @@
       clearTimeout(pickerInjectTimer);
       pickerInjectTimer = null;
     }
+    if (pickerDeferredRefreshTimer) {
+      clearTimeout(pickerDeferredRefreshTimer);
+      pickerDeferredRefreshTimer = null;
+    }
 
     const panel = document.getElementById('chat-emotes-picker-panel');
     if (!panel) return;
-    const parts = pickerFindParts(panel);
-    pickerUnlockSize(panel, parts);
     panel.querySelectorAll('[data-kte-native-hidden="1"]').forEach(child => {
       child.hidden = false;
       delete child.dataset.kteNativeHidden;
@@ -2601,7 +2896,14 @@
   // ─── Init ─────────────────────────────────────────────────────────────────
 
   function currentChannelSlug() {
-    const slug = location.pathname.replace(/^\//, '').split('/')[0].toLowerCase();
+    const parts = location.pathname.replace(/^\//, '').split('/');
+    // Popout chat lives at /popout/<channel>/chat, so the channel is the second
+    // segment there. Verified against the live site: the popout page carries the
+    // same chat DOM (MSG_SELECTORS[0]/[1] and [data-testid="chat-input"] all
+    // match), so without this it renders global emotes only — and leaves
+    // *_c_popout keys in the cache for every popout ever opened.
+    const raw = (parts[0] ?? '').toLowerCase() === 'popout' ? (parts[1] ?? '') : (parts[0] ?? '');
+    const slug = raw.toLowerCase();
     return NON_CHANNEL_SLUGS.has(slug) ? null : slug || null;
   }
 
@@ -2620,6 +2922,8 @@
   async function init() {
     const seq = ++initSeq;
     const slug = currentChannelSlug();
+    loadedProviders = new Map();
+    activeLoaders = [];
     preconnectEmoteHosts();
 
     if (!slug) {
@@ -2644,28 +2948,20 @@
     waitForInput();
     log(`Loading emotes for /${channelSlug}…`);
 
+    // Every provider is fetched regardless of the settings toggles: the fetches
+    // are cache-backed and cheap, and keeping the layers loaded is what lets a
+    // provider be switched back on instantly instead of waiting on a refetch.
     const allLoaders = [
-      { key: 'bttv_g', fn: options => loadBTTVGlobal(options), isChannel: false },
-      { key: '7tv_g', fn: options => load7TVGlobal(options), isChannel: false },
-      { key: 'ffz_g', fn: options => loadFFZGlobal(options), isChannel: false },
-      { key: `bttv_c_${slug}`, fn: options => loadBTTVChannel(slug, options), isChannel: true },
-      { key: `7tv_c_${slug}`, fn: options => load7TVChannel(slug, options), isChannel: true },
-      { key: `ffz_c_${slug}`, fn: options => loadFFZChannel(slug, options), isChannel: true },
+      { key: 'bttv_g', provider: 'BTTV', fn: options => loadBTTVGlobal(options), isChannel: false },
+      { key: '7tv_g', provider: '7TV', fn: options => load7TVGlobal(options), isChannel: false },
+      { key: 'ffz_g', provider: 'FFZ', fn: options => loadFFZGlobal(options), isChannel: false },
+      { key: `bttv_c_${slug}`, provider: 'BTTV', fn: options => loadBTTVChannel(slug, options), isChannel: true },
+      { key: `7tv_c_${slug}`, provider: '7TV', fn: options => load7TVChannel(slug, options), isChannel: true },
+      { key: `ffz_c_${slug}`, provider: 'FFZ', fn: options => loadFFZChannel(slug, options), isChannel: true },
     ];
 
     const failedLoaders = [];
-    const loadedProviders = new Map();
-
-    // Channel emotes override globals; globals never overwrite an existing entry.
-    // Resolution order is non-deterministic, so rebuild from known provider layers
-    // when any provider updates.
-    function rebuildEmoteMap() {
-      emoteMap.clear();
-      for (const loader of allLoaders) {
-        const entries = loadedProviders.get(loader.key);
-        if (entries) mergeEmoteEntries(entries, loader.isChannel);
-      }
-    }
+    activeLoaders = allLoaders;
 
     function applyProviderEntries(loader, entries) {
       if (seq !== initSeq || currentChannelSlug() !== slug) return;
@@ -2797,6 +3093,8 @@
   document.readyState === 'loading'
     ? document.addEventListener('DOMContentLoaded', waitForDOMThenInit)
     : waitForDOMThenInit();
+
+  applyEmoteSize();
 
   // One-time storage cleanup, off the critical path.
   RIC(sweepCache);

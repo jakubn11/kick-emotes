@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.10.0] - 2026-08-23
+
+### Added
+- **Settings, as a row of chips at the top of the 7TV+ picker tab.** Toggle each provider (7TV / BTTV / FFZ) on or off, and pick the chat emote size — 22px, 28px (the default) or 36px. Both apply immediately: no reload, no channel change. An enabled provider chip wears its own brand colour, matching the source badges. Stored locally in a `kte_v2_settings` record alongside usage and favourites, and exempt from the cache sweep. Providers are still fetched while hidden — the requests are cache-backed and cheap, and keeping the layers loaded is what makes switching one back on instant.
+- **Enter inserts the highlighted autocomplete suggestion.** After navigating the popup with ↑/↓, Enter now completes the focused emote instead of sending the half-typed message. With nothing explicitly focused, Enter still sends as before — Tab remains the "just take the top match" key.
+
+### Fixed
+- **Popout chat gets channel emotes.** Kick's popout chat lives at `/popout/<channel>/chat`, and the slug was read from the first path segment — so it resolved to `popout`, every channel loader queried a channel by that name and missed, and only global emotes rendered. It also left a `*_c_popout` cache key per provider behind for a week. Verified against the live page: it carries the same chat DOM as the embedded chat (`MSG_SELECTORS[0]`/`[1]` and `[data-testid="chat-input"]` all match), so everything else already worked there.
+- **A zero-width emote no longer leaves a stray space after the emote it overlays.** The whitespace token before an overlay stayed in the output even though the overlay is absolutely positioned on the previous emote, so `POGGERS cvMask Sadge` rendered with a double gap before `Sadge`. Visible because chat uses `pre-wrap`.
+- **The hover tooltip now follows the emote it belongs to.** `#kte-tip` is positioned `fixed` and was placed once on `mouseenter`, so live chat scrolling past a hovered emote — or scrolling the picker grid under a stationary cursor — left the tooltip floating where the emote used to be. It now re-anchors on scroll and resize, and hides once its emote leaves the viewport.
+- **A tooltip is no longer stranded when its emote disappears.** Removing an element out from under the cursor fires no `mouseleave`, so a chat row recycled by Kick's virtual list left its tooltip on screen until the next hover. The tooltip now hides when its anchor disconnects.
+- **The autocomplete popup no longer lingers after a message is sent.** Kick clears the Lexical editor programmatically, which fires no `input` event, so the suggestion list stayed open over an empty input. Enter now closes it.
+- **The emote picker no longer stays stale when a provider resolves during the post-navigation defer window.** Refreshes that arrive while the 7TV+ tab is open and busy are deliberately deferred, but only another provider resolving would retry them — if the deferred one was the last, the picker kept showing the pre-refresh set until the user switched tabs. Deferred refreshes are now re-checked every 2 s until they can run.
+- A zero-width emote whose image URL `safeUrl()` rejects now falls back to its code as text, matching what `makeEmoteWrap` does for regular emotes, instead of dropping the token out of the message entirely.
+- The autocomplete match list is filtered before it is stored, so it can no longer drift out of step with the rendered rows and commit the wrong emote on ↑/↓ + Tab.
+
+### Changed
+- Removed the picker's dead height-lock helpers (`pickerUnlockElementHeight` / `pickerUnlockSize`). Nothing had set `_kteHeightLock` since the sizing approach changed, so both were no-ops called on every tab switch and reset.
+
 ## [2.9.1] - 2026-07-31
 
 ### Fixed

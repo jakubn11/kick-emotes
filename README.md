@@ -33,6 +33,7 @@
 - Zero-width emote overlays (7TV overlay emotes and BTTV's `cvMask`, `SoSnowy`, `SantaHat` & co.)
 - Hover tooltips showing a large emote preview with its name and provider
 - Favourite emotes — star them from the right-click menu for a pinned picker section and top billing in autocomplete
+- Settings in the picker — turn individual providers off and choose the chat emote size, applied instantly
 - Autocomplete popup when typing (prefix match with substring fallback, favourites then your most-used emotes first, keyboard navigation)
 - Right-click context menu on chat and picker emotes — favourite it, copy the name or image URL, or open the emote's 7TV/BTTV/FFZ page
 - Third-party emote tab inside Kick's native emote picker with **Favourites** and **Recently used** sections, search, animated emotes, and per-provider **Load more**
@@ -89,11 +90,14 @@ Open any Kick channel. Emotes load automatically and replace matching words in c
 |-----|--------|
 | ↑ / ↓ | Navigate suggestions |
 | Tab | Insert the selected emote (top match if none is selected) |
+| Enter | Insert the highlighted emote — sends the message as usual when nothing is highlighted |
 | Esc | Close autocomplete |
 
 **Context menu:** right-click any third-party emote — in chat or in the picker — to favourite it, copy its name or image URL, or open its page on the source provider.
 
 **Favourites:** starred emotes get a ★ marker wherever they appear, a **Favourites** section at the top of the picker (most recently starred first), and first place in the autocomplete ranking, ahead of your most-used emotes. Up to 100 are kept locally; starring a 101st drops the oldest.
+
+**Settings:** the 7TV+ picker tab opens with a row of chips. The three provider chips turn 7TV, BTTV and FFZ on or off; the size chips set how large emotes render in chat (22px, 28px default, or 36px). Changes apply straight away — already-rendered messages update in place. Hidden providers are still fetched in the background so switching one back on is instant. Your choices are stored locally in `kte_v2_settings`.
 
 **Emote picker:** open Kick's native emote picker and choose the **7TV+** tab to browse animated third-party emotes. **Favourites** and **Recently used** sections appear above the provider groups. The picker starts with 40 matches per provider for performance, then offers **Load more** per provider. Search narrows across all loaded emotes. Clicking an emote inserts its code into the chat input. Animated 7TV emotes show their frozen first frame in the picker and start animating when you hover them — this keeps the page responsive when browsing large emote sets.
 
@@ -101,10 +105,11 @@ Open any Kick channel. Emotes load automatically and replace matching words in c
 
 | Symptom | Fix |
 |---------|-----|
+| Emotes from one provider are missing | Check the provider chips at the top of the 7TV+ picker tab — a greyed-out chip means that provider is switched off. |
 | No emotes appear | Open your browser's DevTools → Console and look for `[KickEmotes]` log lines. If absent, check that your userscript extension is enabled for kick.com. |
 | Only global emotes load | The streamer may not have BTTV/7TV/FFZ configured for their channel. |
 | Emotes stop working after a Kick update | Kick may have changed their chat DOM selectors. Open an issue with the relevant class names from the browser inspector. |
-| Stale emotes after a script update | Clear the cache: `Object.keys(localStorage).filter(k => k.startsWith('kte_') && k !== 'kte_v2_usage' && k !== 'kte_v2_favs').forEach(k => localStorage.removeItem(k))` — the `kte_v2_usage` and `kte_v2_favs` keys are excluded so your favourites, recently-used emotes, and autocomplete ranking survive. |
+| Stale emotes after a script update | Clear the cache: `Object.keys(localStorage).filter(k => k.startsWith('kte_') && !['kte_v2_usage', 'kte_v2_favs', 'kte_v2_settings'].includes(k)).forEach(k => localStorage.removeItem(k))` — the `kte_v2_usage`, `kte_v2_favs` and `kte_v2_settings` keys are excluded so your favourites, recently-used emotes, autocomplete ranking, and settings survive. |
 
 ## License
 
