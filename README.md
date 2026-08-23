@@ -33,7 +33,7 @@
 - Zero-width emote overlays (7TV overlay emotes and BTTV's `cvMask`, `SoSnowy`, `SantaHat` & co.)
 - Hover tooltips showing a large emote preview with its name and provider
 - Favourite emotes — star them from the right-click menu for a pinned picker section and top billing in autocomplete
-- Settings in the picker — turn individual providers off and choose the chat emote size, applied instantly
+- Settings in the picker — turn individual providers off, applied instantly
 - Autocomplete popup when typing (prefix match with substring fallback, favourites then your most-used emotes first, keyboard navigation)
 - Right-click context menu on chat and picker emotes — favourite it, copy the name or image URL, or open the emote's 7TV/BTTV/FFZ page
 - Third-party emote tab inside Kick's native emote picker with **Favourites** and **Recently used** sections, search, animated emotes, and per-provider **Load more**
@@ -97,7 +97,7 @@ Open any Kick channel. Emotes load automatically and replace matching words in c
 
 **Favourites:** starred emotes get a ★ marker wherever they appear, a **Favourites** section at the top of the picker (most recently starred first), and first place in the autocomplete ranking, ahead of your most-used emotes. Up to 100 are kept locally; starring a 101st drops the oldest.
 
-**Settings:** the 7TV+ picker tab opens with a row of chips. The three provider chips turn 7TV, BTTV and FFZ on or off; the size chips set how large emotes render in chat (22px, 28px default, or 36px). Changes apply straight away — already-rendered messages update in place. Hidden providers are still fetched in the background so switching one back on is instant. Your choices are stored locally in `kte_v2_settings`.
+**Settings:** the 7TV+ picker tab opens with a row of chips that turn 7TV, BTTV and FFZ on or off. Changes apply straight away — already-rendered messages update in place. The row hides itself as soon as you scroll the grid and slides back when you scroll to the top, so it never covers emotes. Hidden providers are still fetched in the background so switching one back on is instant. Your choices are stored locally in `kte_v2_settings`.
 
 **Emote picker:** open Kick's native emote picker and choose the **7TV+** tab to browse animated third-party emotes. **Favourites** and **Recently used** sections appear above the provider groups. The picker starts with 40 matches per provider for performance, then offers **Load more** per provider. Search narrows across all loaded emotes. Clicking an emote inserts its code into the chat input. Animated 7TV emotes show their frozen first frame in the picker and start animating when you hover them — this keeps the page responsive when browsing large emote sets.
 

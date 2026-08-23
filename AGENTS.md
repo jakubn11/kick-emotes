@@ -35,9 +35,10 @@ Manual testing is required in a browser with a userscript manager installed:
 10. Hover an emote in chat and in the picker and verify the tooltip shows the large preview without jumping once the image loads.
 11. Hover an emote in a busy chat without moving the cursor: the tooltip should track the emote as messages scroll it up, and disappear once the emote scrolls out or its row is recycled.
 12. Toggle a provider chip off and on in the picker: its section and emotes should vanish from the picker, autocomplete, and *already-rendered* chat messages, and come back intact. Toggle repeatedly and confirm no spaces accumulate around zero-width emotes.
-13. Change the emote size chips and confirm chat emotes resize immediately (the picker grid stays at 32px by design) and that the choice survives a reload.
+13. Scroll the picker grid and confirm the settings chip row hides, then scroll back to the top and confirm it returns. Check both scroll cases: the tab's own scrollbar, and a short tab where Kick's panel is the scroller.
 14. Open `/popout/<channel>/chat` and confirm channel emotes load, not just globals.
 15. Post `cvMask` after another emote in a channel with BTTV loaded and verify it overlays rather than sitting beside it.
+16. Compare the 7TV+ tab button against Kick's native tabs: same size and spacing, the active underline appears under it when the tab is selected, and no horizontal scrollbar shows under the tab strip.
 
 ## Userscript Metadata
 
@@ -59,7 +60,7 @@ Do not add `Co-Authored-By:` trailers to git commits.
 - Cache helper using `localStorage` keys prefixed with `kte_v3_` (old-prefix and long-expired keys are swept once per page load)
 - Local emote-usage tracker (`kte_v2_usage`) powering autocomplete ranking and the picker's "Recently used" section
 - Local favourites store (`kte_v2_favs`) powering the picker's "Favourites" section, the top of the autocomplete ranking, and the ★ markers
-- Local settings store (`kte_v2_settings`) — per-provider visibility and chat emote size — surfaced as the chip row at the top of the picker tab
+- Local settings store (`kte_v2_settings`) — per-provider visibility — surfaced as the chip row at the top of the picker tab
 - Module-level provider layers (`loadedProviders` / `activeLoaders`) and `rebuildEmoteMap()`, so a settings change can refilter `emoteMap` without re-running `init()`
 - Emote context menu (`#kte-menu`) on right-clicked chat **and picker** emotes
 - Provider loaders for BTTV, 7TV, and FFZ
@@ -87,12 +88,18 @@ Two separate namespaces, deliberately:
 
 ### Settings
 
-`kte_v2_settings` holds `{ providers: { '7TV': bool, BTTV: bool, FFZ: bool }, size: 22 | 28 | 36 }`. Two things are load-bearing:
+`kte_v2_settings` holds `{ providers: { '7TV': bool, BTTV: bool, FFZ: bool } }`. Two things are load-bearing:
 
 - **Hidden providers are still fetched.** `allLoaders` runs every provider regardless; `rebuildEmoteMap()` is what filters by `providerEnabled()`. The fetches are cache-backed and cheap, and keeping the layers in `loadedProviders` is what makes re-enabling instant. Do not "optimize" this into skipping the fetch — re-enabling would then need a refetch, and the obvious way to trigger one (`init()`) tears down the picker the user is clicking in.
 - **Turning a provider off has to un-render.** Message processing only ever goes text → image, so `unrenderEmoteWraps()` walks `.kte-wrap` elements back to text before the reprocess. It rebuilds tokens from each `img`'s `alt`, which is why the alt must stay set to the emote code on both `.kte-img` and `.kte-zw`. `processTextNode` drops the whitespace preceding an absorbed overlay for the same reason: left in, it orphans on un-render and grows the gap by one space on every toggle cycle. Round-trip stability was verified against a live page across three render/un-render cycles.
 
-Emote size is written into its own `<style>` element (`_sizeStyle`) that `applyEmoteSize()` rewrites — a later sheet at equal specificity beats the base `.kte-img` / `.kte-zw` rules without `!important`, and it keeps the palette rule below (no CSS custom properties) intact.
+`pickerBuildTab()` clones a native tab button (preferring one with an `svg`, so it doesn't copy the avatar tab's `<img>` classes) and replaces its icon with `pickerBuildTabIcon()`, carrying over only the icon's `class`. Do not go back to hand-writing the button's markup: the tabs' sizing, hover and active underline are all Tailwind classes on Kick's side, and a hand-written copy drifts as soon as they restyle — that is how the tab lost its underline once already (`group-data-[active=true]:!bg-green-500` became `group-data-[active=true]:bg-green-500!`). The clone has its `id`/`data-testid` attributes and any label text stripped.
+
+Adding a sixth tab overflows Kick's strip: it is sized to fit its own tabs exactly, and its scroller (`overflow-x: auto`, the `relative w-full max-w-full overflow-y-auto pr-3` box) then paints a horizontal scrollbar under the icons. The `div:has(> #kte-picker-tab)` rules tighten the row's gap to 6px and let the tabs shrink to a 32px floor to claw that width back. Keep the floor above the 28px icon, and don't be tempted to hide the scrollbar instead — the tab would just sit off-screen.
+
+The tab button sizes its own icon (`[&_svg]:size-7 [&_svg]:lg:size-6`) and rounds it (`[&_svg]:rounded-full`), so don't copy width/height attributes onto the icon and don't give it a backplate: an SVG root clips to its border radius, so the corners would be shaved. `pickerBuildTabIcon()` therefore draws `icon.svg`'s winking face without its dark plate, reusing that file's path data verbatim — edit the two together. Its viewBox (`5.5 5.5 53 53`) crops to just outside the face, which spans 10-54, leaving the circle at ~83% of the icon box; widen the crop to shrink the face, tighten it to grow it. Kick's emote icons are images with their own transparent margin, which is why a face drawn edge to edge looks oversized next to them.
+
+The chip row is `position: sticky`, so it would sit on top of the grid once scrolled. `pickerAttachSettingsAutoHide()` observes a 1px `.kte-settings-sentinel` at the very top of `#kte-picker-content` and toggles `data-kte-hidden` on the row. A sentinel rather than a scroll listener because the scroller is not always the same element — the tab scrolls itself when its content overflows, and Kick's panel scrolls it otherwise; an `IntersectionObserver` against the viewport accounts for either one's clipping for free. Detach it in `pickerMarkContentStale()` alongside the image loader.
 
 ## External APIs
 
@@ -132,7 +139,7 @@ When fixing Kick DOM breakage, prefer adding fallback selectors rather than repl
 
 ## Emote Rendering Notes
 
-- Emote images use `.kte-img`. 28px is the *default* height only — the size setting rewrites `.kte-img` / `.kte-zw` through `_sizeStyle`, so don't treat 28 as fixed or hard-code it anywhere else.
+- Emote images use `.kte-img`, at 28px, with zero-width overlays matching at `.kte-zw`. Change both together.
 - Zero-width emotes overlay the previous emote via `.kte-zw` — 7TV emotes flagged by the provider, plus the BTTV codes in `BTTV_ZERO_WIDTH`. The whitespace token preceding an absorbed overlay is dropped: the overlay is absolutely positioned, so that space renders as a stray gap (chat is `pre-wrap`) and orphans on un-render, growing by one space per toggle cycle.
 - Every emote `img` keeps its code in `alt`, on `.kte-zw` overlays as much as on `.kte-img`. That is not just for copy/paste — `unrenderEmoteWraps()` reconstructs the original message tokens from the alts when a provider is switched off.
 - `makeEmoteWrap` returns a plain text node when `safeUrl()` rejects the emote's URL. Only elements may anchor a zero-width overlay — a text node has no `dataset` and throws on `appendChild`, which would abort rendering for the whole message. Keep the element check on the zero-width anchor.
@@ -233,7 +240,7 @@ family palette — do not add more without the same kind of justification.
 - `#kte-ac` — autocomplete dropdown (green top border + green header label)
 - `#kte-menu` — emote context menu (green left border stripe)
 - `.kte-picker-more` — picker action button (green background tint, green border)
-- `.kte-picker-settings` / `.kte-chip` — the picker's settings row. It counts as its own component for the one-accent rule: its accent is the selected-chip treatment (matching kick-fullscreen-chat's `.kfc-settings-chip.kfc-selected`), which is why green appears here as well as on `.kte-picker-more`. Provider chips override it with their own brand colour when enabled — same justification as the source badges.
+- `.kte-picker-settings` / `.kte-chip` — the picker's settings row, a rounded card (14px radius, hairline border) that auto-hides while the grid is scrolled. It counts as its own component for the one-accent rule: its accent is the selected-chip treatment (matching kick-fullscreen-chat's `.kfc-settings-chip.kfc-selected`), which is why green appears here as well as on `.kte-picker-more`. Provider chips override it with their own brand colour when enabled — same justification as the source badges.
 
 ## Documentation
 

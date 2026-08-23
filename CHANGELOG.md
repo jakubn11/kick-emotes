@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.0] - 2026-08-23
+
+### Changed
+- **The picker's settings row is now just the three provider chips.** The 22px / 28px / 36px emote-size chips and their `Size` label are gone, along with the setting behind them — the row wrapped onto a second line at typical chat widths, and the two lines of chips took a visible bite out of the emote grid. Chat emotes render at 28px (the previous default), so nothing moves for anyone who never changed it; a stored `size` is ignored and dropped on the next settings write.
+- **The settings row is a rounded card instead of a full-bleed bar.** It has its own horizontal padding and rounded corners now, and the first section header (`7TV (1015)`) no longer sits flush against its bottom edge — the row carries a 12px bottom margin and the headers a little leading of their own, so nothing gets cropped.
+
+### Fixed
+- **No scrollbar under the tab strip.** Kick's tab row is sized to fit exactly the tabs it ships with (five of them came to 236px in a 248px box), so our sixth tipped its scroller into horizontal scrolling and it painted a 4px scrollbar right under the icons — easy to read as a line beneath the native tabs that stops short of ours. The row now uses a 6px gap and lets its tabs shrink a few pixels, down to a 32px floor that still holds their 28px icon, which buys back more than the width our tab costs. With enough native tabs it scrolls anyway, exactly as Kick's own does.
+- **The 7TV+ tab button now matches Kick's own tabs.** Its markup was hand-written against Kick's Tailwind classes, and those have since moved on — the underline's active hook is now `group-data-[active=true]:bg-green-500!`, not the `!bg-green-500` the script was writing — so the tab rendered without the green active bar and didn't sit like its neighbours. It is now cloned from a native tab with the icon swapped in, so it inherits whatever padding, hover and underline Kick currently gives them (ids and `data-testid`s are stripped from the copy so it can't answer for the tab it came from).
+- **The tab icon is now the project icon.** It was a four-dot tile that matched nothing; the tab now shows the same winking face as `icon.svg` and the README, minus its dark rounded plate — every icon in that row is round (the buttons apply `[&_svg]:rounded-full` / `[&_img]:rounded-full`) and an SVG root clips to its own border radius, so a plate would have had its corners shaved. Sized to about 83% of the icon box so it doesn't loom over Kick's emote icons, which are images carrying their own transparent margin.
+- **The settings row no longer sits on top of the emotes when you scroll.** It is `position: sticky`, so it stayed pinned over the top row of the grid for the whole scroll. It now hides as soon as the grid scrolls away from the top and slides back when you return there. A 1px sentinel plus an `IntersectionObserver` drives it, which covers both scrollers — the tab's own overflow and Kick's panel — without a scroll listener.
+
 ## [2.10.0] - 2026-08-23
 
 ### Added

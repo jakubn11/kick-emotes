@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Kick Third-Party Emotes
 // @namespace    https://kick.com
-// @version      2.10.0
-// @description  Adds BetterTTV, 7TV & FrankerFaceZ emotes to Kick.com chat — animated & zero-width emotes, usage-ranked autocomplete, favourites, hover previews, right-click emote menu, native picker tab with recents, per-provider toggles & emote size
+// @version      2.11.0
+// @description  Adds BetterTTV, 7TV & FrankerFaceZ emotes to Kick.com chat — animated & zero-width emotes, usage-ranked autocomplete, favourites, hover previews, right-click emote menu, native picker tab with recents & per-provider toggles
 // @author       jakubnl94@gmail.com
 // @license      GPL-3.0-only
 // @icon         https://raw.githubusercontent.com/jakubn11/kick-third-party-emotes/main/icon.svg
@@ -301,15 +301,13 @@
   // and is exempt from the cache sweep.
 
   const PROVIDERS = ['7TV', 'BTTV', 'FFZ'];
-  const EMOTE_SIZES = [22, 28, 36];
-  const DEFAULT_EMOTE_SIZE = 28;
 
   let settings = null;
   let settingsSaveQueued = false;
 
   function settingsLoad() {
     if (settings) return settings;
-    settings = { providers: {}, size: DEFAULT_EMOTE_SIZE };
+    settings = { providers: {} };
     for (const provider of PROVIDERS) settings.providers[provider] = true;
     try {
       const raw = localStorage.getItem(SETTINGS_KEY);
@@ -320,7 +318,6 @@
             settings.providers[provider] = saved.providers[provider];
           }
         }
-        if (EMOTE_SIZES.includes(saved?.size)) settings.size = saved.size;
       }
     } catch { /* corrupted record – fall back to defaults */ }
     return settings;
@@ -338,8 +335,8 @@
     RIC(() => {
       settingsSaveQueued = false;
       try {
-        const { providers, size } = settingsLoad();
-        localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ts: Date.now(), providers, size }));
+        const { providers } = settingsLoad();
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ts: Date.now(), providers }));
       } catch { /* quota exceeded – skip silently */ }
     });
   }
@@ -614,6 +611,10 @@
     #kte-picker-content[hidden] { display: none !important; }
     .kte-picker-provider {
       display: block;
+      /* Kick's text-xs leaves no room above the caps, so the row's bottom edge
+         crops the header when it sits right under it. */
+      line-height: 1.5;
+      padding-top: 2px;
     }
     .kte-picker-grid {
       display: flex;
@@ -669,6 +670,27 @@
       pointer-events: none;
       text-shadow: 0 1px 2px rgba(0,0,0,.9);
     }
+    /* Kick sizes the tab strip to fit exactly the tabs it ships with, so our
+       extra one tips its scroller (overflow-x: auto) into scrolling and it
+       paints a horizontal scrollbar directly under the icons — which reads as
+       a line under the native tabs that stops short of ours. Tighten the row
+       instead of overflowing it: a slightly smaller gap, and tabs allowed to
+       give up a few pixels down to a floor that still holds their 28px icon.
+       With enough native tabs it will scroll anyway, exactly as Kick's own
+       does — this only buys back the width our one tab costs. */
+    div:has(> #kte-picker-tab) {
+      gap: 6px;
+    }
+    div:has(> #kte-picker-tab) > button {
+      flex-shrink: 1;
+      min-width: 32px;
+    }
+    /* Zero-height marker at the very top of the tab. While it is in view the
+       tab is scrolled to the top; once it scrolls out, the settings row hides. */
+    .kte-settings-sentinel {
+      height: 1px;
+      margin-bottom: -1px;
+    }
     /* Settings row at the top of the picker tab */
     .kte-picker-settings {
       position: sticky;
@@ -678,12 +700,23 @@
       align-items: center;
       flex-wrap: wrap;
       gap: 6px;
-      /* Negative margin + own padding so the row covers #kte-picker-content's
-         top padding when stuck, instead of letting emotes scroll past above it. */
-      margin: -8px 0 2px;
-      padding: 8px 0;
+      /* A rounded card rather than a full-bleed bar. It auto-hides once the grid
+         scrolls, so it no longer needs the negative margin that made it cover
+         #kte-picker-content's top padding. The bottom margin keeps the first
+         section header clear of it. */
+      margin: 0 0 12px;
+      padding: 8px 12px;
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 14px;
       background: rgba(16,16,19,.92);
       backdrop-filter: blur(8px);
+      transition: opacity .12s ease, transform .12s ease;
+    }
+    /* Out of the way while the grid is scrolled, so it never sits on emotes. */
+    .kte-picker-settings[data-kte-hidden="1"] {
+      opacity: 0;
+      transform: translateY(-100%);
+      pointer-events: none;
     }
     .kte-chip {
       border: 1px solid rgba(255,255,255,.1);
@@ -733,15 +766,6 @@
     .kte-chip[data-on="1"][data-provider="FFZ"]:hover {
       background: rgba(192,132,252,.2); border-color: rgba(192,132,252,.6);
     }
-    .kte-settings-label {
-      font-size: 10px;
-      font-weight: 700;
-      color: rgba(255,255,255,.25);
-      text-transform: uppercase;
-      letter-spacing: .08em;
-      margin-left: 4px;
-    }
-
     .kte-picker-empty {
       color: #71717a;
       font-size: 12px;
@@ -804,20 +828,6 @@
     }
   `;
   (document.head ?? document.documentElement).appendChild(_style);
-
-  // Emote size is a user setting, so its rules live in their own sheet that gets
-  // rewritten on change. A later sheet at equal specificity wins, so this
-  // overrides the .kte-img / .kte-zw heights above without !important.
-  const _sizeStyle = document.createElement('style');
-  (document.head ?? document.documentElement).appendChild(_sizeStyle);
-
-  function applyEmoteSize() {
-    const px = settingsLoad().size;
-    _sizeStyle.textContent = `
-    .kte-img { height: ${px}px; max-width: ${px * 4}px; }
-    .kte-zw { height: ${px}px; }
-  `;
-  }
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -2238,6 +2248,7 @@
   function pickerMarkContentStale(content) {
     if (content) {
       pickerDetachImageLoader(content);
+      pickerDetachSettingsAutoHide(content);
       content.querySelectorAll('img[data-kte-loaded="1"]').forEach(img => {
         img.removeAttribute('src');
         delete img.dataset.kteLoaded;
@@ -2426,8 +2437,8 @@
     return chip;
   }
 
-  // Settings row pinned to the top of the tab: which providers render, and how
-  // big emotes are in chat. Both apply immediately — no reload, no channel change.
+  // Settings row pinned to the top of the tab: which providers render. Toggles
+  // apply immediately — no reload, no channel change.
   function pickerBuildSettings() {
     const row = document.createElement('div');
     row.className = 'kte-picker-settings';
@@ -2451,34 +2462,40 @@
       row.appendChild(chip);
     }
 
-    const label = document.createElement('span');
-    label.className = 'kte-settings-label';
-    label.textContent = 'Size';
-    row.appendChild(label);
-
-    for (const px of EMOTE_SIZES) {
-      const chip = pickerBuildChip(`${px}px`, `Show chat emotes at ${px}px`);
-      chip.dataset.size = String(px);
-      pickerChipState(chip, settingsLoad().size === px);
-      chip.addEventListener('click', () => {
-        settingsLoad().size = px;
-        settingsSave();
-        applyEmoteSize();
-        // Size is pure CSS — repaint the chips in place rather than rebuilding
-        // the whole grid for it.
-        row.querySelectorAll('.kte-chip[data-size]').forEach(other => {
-          pickerChipState(other, Number(other.dataset.size) === px);
-        });
-      });
-      row.appendChild(chip);
-    }
-
     return row;
+  }
+
+  // The settings row is sticky, so once the grid scrolls it would cover the top
+  // row of emotes. Hide it while the tab is scrolled away from the top and bring
+  // it back on return. Observing a sentinel instead of listening for scroll keeps
+  // this working for either scroller — the tab's own overflow, and Kick's panel
+  // scroller when the tab itself isn't the one scrolling.
+  function pickerAttachSettingsAutoHide(content) {
+    if (!content || content._kteSettingsObserver) return;
+    const sentinel = content.querySelector('.kte-settings-sentinel');
+    const row = content.querySelector('.kte-picker-settings');
+    if (!sentinel || !row) return;
+    const observer = new IntersectionObserver(entries => {
+      const atTop = entries[entries.length - 1].isIntersecting;
+      row.dataset.kteHidden = atTop ? '0' : '1';
+      if (!atTop) hideTooltip(); // a chip tooltip would outlive the row otherwise
+    });
+    observer.observe(sentinel);
+    content._kteSettingsObserver = observer;
+  }
+
+  function pickerDetachSettingsAutoHide(content) {
+    content?._kteSettingsObserver?.disconnect();
+    if (content) content._kteSettingsObserver = null;
   }
 
   function pickerBuildContent(query) {
     const wrap = document.createElement('div');
     wrap.id = 'kte-picker-content';
+    const sentinel = document.createElement('div');
+    sentinel.className = 'kte-settings-sentinel';
+    sentinel.setAttribute('aria-hidden', 'true');
+    wrap.appendChild(sentinel);
     wrap.appendChild(pickerBuildSettings());
     const sectionsContainer = document.createElement('div');
     sectionsContainer.className = 'grid gap-2';
@@ -2612,6 +2629,7 @@
       oldContent.replaceWith(content);
     }
     else parts.mainGrid.appendChild(content);
+    pickerAttachSettingsAutoHide(content);
 
     if (!content.hidden) {
       content.scrollTop = scrollTop;
@@ -2701,56 +2719,92 @@
     pickerApplyActiveState(panel);
   }
 
+  // The project icon (`icon.svg`) — the same winking face, minus its dark rounded
+  // plate, since the tab icons sit on the panel background and the buttons round
+  // them anyway (`[&_svg]:rounded-full`, which would shave a plate's corners off).
+  // The path data below is icon.svg's, unchanged; keep the two in step. Only the
+  // viewBox differs: it crops to just outside the face (which spans 10-54) so the
+  // circle fills ~83% of the icon box. Kick's own emote icons are images with
+  // their own transparent margin, so a face drawn edge to edge reads too large.
+  // Widen the crop to shrink the face, tighten it to grow it.
   function pickerBuildTabIcon() {
     const ns = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(ns, 'svg');
-    svg.setAttribute('viewBox', '0 0 28 28');
-    svg.setAttribute('width', '28');
-    svg.setAttribute('height', '28');
+    svg.setAttribute('viewBox', '5.5 5.5 53 53');
+    svg.setAttribute('width', '24');
+    svg.setAttribute('height', '24');
     svg.setAttribute('fill', 'none');
     svg.setAttribute('aria-hidden', 'true');
 
-    const tile = document.createElementNS(ns, 'rect');
-    tile.setAttribute('x', '4');
-    tile.setAttribute('y', '4');
-    tile.setAttribute('width', '20');
-    tile.setAttribute('height', '20');
-    tile.setAttribute('rx', '7');
-    tile.setAttribute('fill', '#22c55e');
-    svg.appendChild(tile);
-
-    const addDot = (cx, cy) => {
-      const dot = document.createElementNS(ns, 'circle');
-      dot.setAttribute('cx', cx);
-      dot.setAttribute('cy', cy);
-      dot.setAttribute('r', '2.2');
-      dot.setAttribute('fill', '#101013');
-      svg.appendChild(dot);
+    const add = (name, attrs) => {
+      const node = document.createElementNS(ns, name);
+      for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+      svg.appendChild(node);
     };
-    addDot('10', '10');
-    addDot('18', '10');
-    addDot('10', '18');
-    addDot('18', '18');
+
+    add('circle', { cx: '32', cy: '32', r: '22', fill: '#22c55e' });
+    add('circle', { cx: '24.5', cy: '27.5', r: '3.5', fill: '#101013' });
+    add('path', {
+      d: 'M36 27.5 Q39.5 24 43 27.5',
+      fill: 'none', stroke: '#101013', 'stroke-width': '3.5', 'stroke-linecap': 'round',
+    });
+    add('path', {
+      d: 'M22 38 Q32 48 42 38',
+      fill: 'none', stroke: '#101013', 'stroke-width': '4', 'stroke-linecap': 'round',
+    });
 
     return svg;
   }
 
+  // Built by cloning one of Kick's own tab buttons and swapping the icon, rather
+  // than recreating its markup: the tabs carry a nest of Tailwind classes for
+  // padding, hover and the active underline, and a hand-written copy silently
+  // drifts out of alignment (no underline, wrong spacing) the moment Kick
+  // restyles them. Cloning inherits whatever they currently are.
   function pickerBuildTab(nativeTab) {
-    const tab = document.createElement('button');
+    const tab = nativeTab ? nativeTab.cloneNode(true) : document.createElement('button');
+    const icon = pickerBuildTabIcon();
+
+    if (nativeTab) {
+      // Kick queries its own tabs by id and data-testid; a duplicate of either
+      // would make our clone answer for the tab it was copied from.
+      for (const node of [tab, ...tab.querySelectorAll('[id], [data-testid]')]) {
+        node.removeAttribute('id');
+        node.removeAttribute('data-testid');
+      }
+      // Any label text belongs to the tab we copied — strip it before ours goes in.
+      const walker = document.createTreeWalker(tab, NodeFilter.SHOW_TEXT);
+      const texts = [];
+      while (walker.nextNode()) if (walker.currentNode.nodeValue.trim()) texts.push(walker.currentNode);
+      for (const node of texts) node.remove();
+
+      const nativeIcon = tab.querySelector('svg, img');
+      if (nativeIcon) {
+        // Only the class comes across. The button sizes its icon itself, via
+        // `[&_svg]:size-7 [&_svg]:lg:size-6`, and those beat any width/height
+        // attributes — copying the source icon's (21x16 on the Kick logo tab)
+        // would just leave a wrong aspect ratio behind if that CSS ever lapses.
+        const iconClass = nativeIcon.getAttribute('class');
+        if (iconClass !== null) icon.setAttribute('class', iconClass);
+        nativeIcon.replaceWith(icon);
+      } else {
+        tab.prepend(icon);
+      }
+    } else {
+      tab.appendChild(icon);
+      const underline = document.createElement('div');
+      underline.className = 'z-common h-0.5 w-full transition-colors duration-300 group-data-[active=true]:bg-green-500! betterhover:group-hover:bg-[#475054]';
+      tab.appendChild(underline);
+    }
+
     tab.id = 'kte-picker-tab';
     tab.type = 'button';
+    tab.removeAttribute('title');
     tab.dataset.kteTip = '7TV / BTTV / FFZ emotes';
     tab.addEventListener('mouseenter', () => showTooltip(tab));
     tab.addEventListener('mouseleave', hideTooltip);
     tab.setAttribute('aria-label', 'Third-party emotes');
     tab.setAttribute('data-active', 'false');
-    if (nativeTab) tab.className = nativeTab.className;
-
-    tab.appendChild(pickerBuildTabIcon());
-
-    const underline = document.createElement('div');
-    underline.className = 'betterhover:group-hover:bg-[#475054] z-common h-0.5 w-full transition-colors duration-300 group-data-[active=true]:!bg-green-500';
-    tab.appendChild(underline);
     return tab;
   }
 
@@ -2780,7 +2834,10 @@
 
     let tab = panel.querySelector('#kte-picker-tab');
     if (!tab) {
-      tab = pickerBuildTab(parts.tabsRow.querySelector('button[data-active]'));
+      // Prefer an icon tab to clone. The first tab can be the channel's avatar
+      // button, whose <img> carries avatar-specific classes we don't want.
+      const nativeTabs = [...parts.tabsRow.querySelectorAll('button[data-active]')];
+      tab = pickerBuildTab(nativeTabs.find(button => button.querySelector('svg')) ?? nativeTabs[0]);
       tab.addEventListener('click', e => {
         e.preventDefault();
         e.stopPropagation();
@@ -3093,8 +3150,6 @@
   document.readyState === 'loading'
     ? document.addEventListener('DOMContentLoaded', waitForDOMThenInit)
     : waitForDOMThenInit();
-
-  applyEmoteSize();
 
   // One-time storage cleanup, off the critical path.
   RIC(sweepCache);
